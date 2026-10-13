@@ -814,11 +814,16 @@ document.addEventListener('DOMContentLoaded', () => {
       scope: GOOGLE_SCOPE,
       callback: (tokenResponse) => {
         if (tokenResponse.error !== undefined) {
-          showToast(`Google 인증 오류: ${tokenResponse.error}`, 'error');
+          showToast(`Google 인증 오류: ${tokenResponse.error_description || tokenResponse.error}`, 'error');
           return;
         }
         currentGoogleAccessToken = tokenResponse.access_token;
         createAndShowPicker(currentGoogleAccessToken);
+      },
+      error_callback: (err) => {
+        console.warn('Google Identity 토큰 요청 에러:', err);
+        const msg = err?.message || err?.type || '로그인 창이 닫혔거나 팝업이 차단되었습니다.';
+        showToast(`Google 계정 접근 오류: ${msg}`, 'error');
       }
     });
   }
@@ -835,7 +840,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       await loadPickerApi();
       if (!tokenClient) {
-        tokenClient = initGisClient(clientId);
+        tokenClient = await initGisClient(clientId);
       }
 
       if (currentGoogleAccessToken) {
