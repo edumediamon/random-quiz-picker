@@ -140,6 +140,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const fileInput = document.getElementById('file-input');
   const dataBadge = document.getElementById('data-badge');
   const fileInfoText = document.getElementById('file-info-text');
+  const btnGoogleDrive = document.getElementById('btn-google-drive');
+  const btnGoogleSettings = document.getElementById('btn-google-settings');
+  const googleDriveModal = document.getElementById('google-drive-modal');
+  const btnCloseGoogleModal = document.getElementById('btn-close-google-modal');
+  const btnSaveGoogleConfig = document.getElementById('btn-save-google-config');
+  const btnClearGoogleConfig = document.getElementById('btn-clear-google-config');
+  const inputGoogleClientId = document.getElementById('input-google-client-id');
+  const inputGoogleApiKey = document.getElementById('input-google-api-key');
 
   const filterExam = document.getElementById('filter-exam');
   const filterSubject = document.getElementById('filter-subject');
@@ -671,6 +679,233 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ==========================================================================
+  // Google Drive & Google Picker 연동
+  // ==========================================================================
+  const GOOGLE_CLIENT_ID_KEY = 'quiz_picker_google_client_id';
+  const GOOGLE_API_KEY_KEY = 'quiz_picker_google_api_key';
+  const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+
+  let tokenClient = null;
+  let pickerApiLoaded = false;
+  let currentGoogleAccessToken = null;
+
+  // 서버 환경변수에서 설정 조회 (로컬 서버 연동 시 기본값으로 지원)
+  async function checkServerGoogleConfig() {
+    try {
+      const res = await fetch('/api/google-config');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.clientId && !localStorage.getItem(GOOGLE_CLIENT_ID_KEY)) {
+        localStorage.setItem(GOOGLE_CLIENT_ID_KEY, data.clientId);
+      }
+      if (data.apiKey && !localStorage.getItem(GOOGLE_API_KEY_KEY)) {
+        localStorage.setItem(GOOGLE_API_KEY_KEY, data.apiKey);
+      }
+    } catch (e) {
+      // 서버 미실행 또는 네트워크 오류 시 무시
+    }
+  }
+
+  function getGoogleConfig() {
+    const clientId = (localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || '').trim();
+    const apiKey = (localStorage.getItem(GOOGLE_API_KEY_KEY) || '').trim();
+    return { clientId, apiKey };
+  }
+
+  function openGoogleModal() {
+    if (!googleDriveModal) return;
+    const { clientId, apiKey } = getGoogleConfig();
+    if (inputGoogleClientId) inputGoogleClientId.value = clientId;
+    if (inputGoogleApiKey) inputGoogleApiKey.value = apiKey;
+    googleDriveModal.style.display = 'flex';
+  }
+
+  function closeGoogleModal() {
+    if (!googleDriveModal) return;
+    googleDriveModal.style.display = 'none';
+  }
+
+  if (btnCloseGoogleModal) {
+    btnCloseGoogleModal.addEventListener('click', closeGoogleModal);
+  }
+  if (googleDriveModal) {
+    googleDriveModal.addEventListener('click', (e) => {
+      if (e.target === googleDriveModal) closeGoogleModal();
+    });
+  }
+
+  if (btnGoogleSettings) {
+    btnGoogleSettings.addEventListener('click', openGoogleModal);
+  }
+
+  if (btnSaveGoogleConfig) {
+    btnSaveGoogleConfig.addEventListener('click', () => {
+      const clientId = (inputGoogleClientId?.value || '').trim();
+      const apiKey = (inputGoogleApiKey?.value || '').trim();
+      if (!clientId || !apiKey) {
+        showToast('Google OAuth Client ID와 API Key를 모두 입력해주세요.', 'error');
+        return;
+      }
+      localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clientId);
+      localStorage.setItem(GOOGLE_API_KEY_KEY, apiKey);
+      tokenClient = null;
+      closeGoogleModal();
+      showToast('Google Drive 연동 정보가 브라우저에 저장되었습니다.', 'success');
+    });
+  }
+
+  if (btnClearGoogleConfig) {
+    btnClearGoogleConfig.addEventListener('click', () => {
+      localStorage.removeItem(GOOGLE_CLIENT_ID_KEY);
+      localStorage.removeItem(GOOGLE_API_KEY_KEY);
+      if (inputGoogleClientId) inputGoogleClientId.value = '';
+      if (inputGoogleApiKey) inputGoogleApiKey.value = '';
+      tokenClient = null;
+      currentGoogleAccessToken = null;
+      showToast('Google Drive 연동 설정이 초기화되었습니다.', 'info');
+    });
+  }
+
+  // Google Picker API 로드
+  function loadPickerApi() {
+    return new Promise((resolve, reject) => {
+      if (pickerApiLoaded) return resolve();
+      if (typeof window.gapi === 'undefined') {
+        return reject(new Error('Google API 스크립트(gapi)를 불러올 수 없습니다. 인터넷 연결 또는 보안 설정을 확인해주세요.'));
+      }
+      window.gapi.load('picker', {
+        callback: () => {
+          pickerApiLoaded = true;
+          resolve();
+        },
+        onerror: () => reject(new Error('Google Picker 라이브러리 로드에 실패했습니다.'))
+      });
+    });
+  }
+
+  // Google Identity Services (GIS) 토큰 클라이언트 초기화
+  function initGisClient(clientId) {
+    if (typeof window.google === 'undefined' || !window.google.accounts || !window.google.accounts.oauth2) {
+      throw new Error('Google Identity Services SDK(gsi/client)를 불러올 수 없습니다.');
+    }
+    return window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GOOGLE_SCOPE,
+      callback: (tokenResponse) => {
+        if (tokenResponse.error !== undefined) {
+          showToast(`Google 인증 오류: ${tokenResponse.error}`, 'error');
+          return;
+        }
+        currentGoogleAccessToken = tokenResponse.access_token;
+        createAndShowPicker(currentGoogleAccessToken);
+      }
+    });
+  }
+
+  // Google Drive 파일 선택창 열기
+  async function handleGoogleDrivePicker() {
+    const { clientId, apiKey } = getGoogleConfig();
+    if (!clientId || !apiKey) {
+      showToast('Google Drive를 연동하려면 먼저 Client ID와 API Key 설정이 필요합니다.', 'info');
+      openGoogleModal();
+      return;
+    }
+
+    try {
+      await loadPickerApi();
+      if (!tokenClient) {
+        tokenClient = initGisClient(clientId);
+      }
+
+      if (currentGoogleAccessToken) {
+        createAndShowPicker(currentGoogleAccessToken);
+      } else {
+        tokenClient.requestAccessToken({ prompt: '' });
+      }
+    } catch (err) {
+      showToast(`Google Drive 연동 실패: ${err.message}`, 'error');
+    }
+  }
+
+  if (btnGoogleDrive) {
+    btnGoogleDrive.addEventListener('click', handleGoogleDrivePicker);
+  }
+
+  // Google Picker 생성 및 화면 표시
+  function createAndShowPicker(accessToken) {
+    const { apiKey } = getGoogleConfig();
+    try {
+      const view = new google.picker.View(google.picker.ViewId.DOCS);
+      view.setMimeTypes('application/json,text/csv,text/plain,application/vnd.google.apps.spreadsheet');
+
+      const builder = new google.picker.PickerBuilder()
+        .enableFeature(google.picker.Feature.NAV_HIDDEN)
+        .setOAuthToken(accessToken)
+        .addView(view)
+        .addView(new google.picker.DocsUploadView())
+        .setDeveloperKey(apiKey)
+        .setTitle('Google Drive에서 문제 파일(.json, .csv) 선택')
+        .setCallback((data) => handlePickerCallback(data, accessToken));
+
+      const picker = builder.build();
+      picker.setVisible(true);
+    } catch (err) {
+      console.error('Picker 생성 실패:', err);
+      currentGoogleAccessToken = null;
+      showToast(`Google Picker 창 열기 실패: ${err.message}`, 'error');
+    }
+  }
+
+  // Picker에서 파일 선택 후 다운로드 및 파싱
+  async function handlePickerCallback(data, accessToken) {
+    if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
+      return;
+    }
+
+    if (data[google.picker.Response.ACTION] !== google.picker.Action.PICKED) {
+      return;
+    }
+
+    const docs = data[google.picker.Response.DOCUMENTS];
+    if (!docs || docs.length === 0) return;
+
+    const doc = docs[0];
+    const fileId = doc[google.picker.Document.ID];
+    const fileName = doc[google.picker.Document.NAME] || 'google_drive_file';
+    const mimeType = doc[google.picker.Document.MIME_TYPE] || '';
+
+    showToast(`Google Drive에서 "${fileName}" 파일을 가져오는 중...`, 'info');
+
+    try {
+      let downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+      if (mimeType === 'application/vnd.google.apps.spreadsheet') {
+        downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/csv`;
+      }
+
+      const res = await fetch(downloadUrl, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          currentGoogleAccessToken = null;
+          throw new Error('Google Drive 접근 권한이 만료되었거나 승인되지 않았습니다. 다시 시도해주세요.');
+        }
+        throw new Error(`파일 다운로드 실패 (HTTP ${res.status})`);
+      }
+
+      const content = await res.text();
+      const questions = QuizParser.parseAuto(content, fileName);
+      loadQuestions(questions, `Google Drive (${fileName})`, fileName);
+    } catch (err) {
+      console.error('Google Drive 파일 처리 오류:', err);
+      showToast(`Google Drive 파일 불러오기 실패: ${err.message}`, 'error');
+    }
+  }
+
+  // ==========================================================================
   // 모드 전환 및 풀이 이력 관리
   // ==========================================================================
   modeSingleBtn.addEventListener('click', () => {
@@ -1031,4 +1266,5 @@ document.addEventListener('DOMContentLoaded', () => {
   // 초기화 실행
   initTheme();
   fetchSampleQuestions();
+  checkServerGoogleConfig();
 });

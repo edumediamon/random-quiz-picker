@@ -363,6 +363,13 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { status: 'ok', server: 'random-quiz-picker-local-server', historyDir: HISTORY_DIR });
       return;
     }
+    if (pathname === '/api/google-config' && req.method === 'GET') {
+      sendJson(res, 200, {
+        clientId: process.env.GOOGLE_CLIENT_ID || '',
+        apiKey: process.env.GOOGLE_API_KEY || ''
+      });
+      return;
+    }
     if (pathname === '/api/history') {
       await handleHistoryApi(req, res, parsed.searchParams);
       return;
