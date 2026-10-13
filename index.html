@@ -137,9 +137,13 @@
             </div>
 
             <label class="custom-checkbox" title="현재 세션에서 이미 확인한 문제를 제외하고 무작위 추출합니다.">
-              <input type="checkbox" id="check-exclude-seen">
-              <span>중복 문제 제외</span>
+              <input type="checkbox" id="check-exclude-seen" checked>
+              <span>중복 문제 제외 (기본 적용)</span>
             </label>
+
+            <button id="btn-export-history-txt" class="btn btn-outline" style="padding: 6px 12px; font-size: 0.85rem; display: none;" type="button" title="지금까지 출제된 모든 문제와 정답을 TXT 파일로 다운로드합니다.">
+              <span>💾 풀이 이력 TXT 저장 (<span id="history-export-count">0</span>)</span>
+            </button>
 
             <button id="btn-reset-seen" class="btn btn-outline" style="padding: 6px 10px; font-size: 0.8rem; display: none;" type="button">
               풀이 이력 초기화 (<span id="seen-count">0</span>)

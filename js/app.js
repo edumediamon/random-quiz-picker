@@ -157,7 +157,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const checkExcludeSeen = document.getElementById('check-exclude-seen');
   const btnResetSeen = document.getElementById('btn-reset-seen');
   const seenCountEl = document.getElementById('seen-count');
+  const btnExportHistoryTxt = document.getElementById('btn-export-history-txt');
+  const historyExportCountEl = document.getElementById('history-export-count');
   const btnPickRandom = document.getElementById('btn-pick-random');
+
+  const questionHistory = [];
 
   const resultsContainer = document.getElementById('results-container');
   const toastContainer = document.getElementById('toast-container');
@@ -274,6 +278,93 @@ document.addEventListener('DOMContentLoaded', () => {
     btnResetSeen.style.display = engine.seenCount > 0 ? 'inline-flex' : 'none';
   }
 
+  function updateHistoryStatus() {
+    if (historyExportCountEl) {
+      historyExportCountEl.textContent = questionHistory.length;
+    }
+    if (btnExportHistoryTxt) {
+      btnExportHistoryTxt.style.display = questionHistory.length > 0 ? 'inline-flex' : 'none';
+    }
+  }
+
+  // ==========================================================================
+  // 출제 문제 TXT 파일 포맷 및 다운로드 함수
+  // ==========================================================================
+  function formatQuestionsAsText(questions, title = '출제 문제 기록') {
+    if (window.QuizParser && typeof window.QuizParser.formatQuestionsAsText === 'function') {
+      return window.QuizParser.formatQuestionsAsText(questions, title);
+    }
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const timestampStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+    let output = '';
+    output += '================================================================================\n';
+    output += `[랜덤 문제 추출기] ${title}\n`;
+    output += `저장 일시: ${timestampStr}\n`;
+    output += `총 출제 문항 수: ${questions.length}문항\n`;
+    output += '================================================================================\n\n';
+
+    questions.forEach((q, idx) => {
+      const tags = [
+        q.exam ? `자격증/시험: ${q.exam}` : '',
+        q.subject ? `관련 영역: ${q.subject}` : '',
+        q.type ? `유형: ${q.type}` : '',
+        q.difficulty ? `난이도: ${q.difficulty}` : ''
+      ].filter(Boolean).join(' | ');
+
+      output += `[문항 ${idx + 1}]`;
+      if (tags) output += ` (${tags})`;
+      output += '\n';
+      output += `제목: ${q.title} (ID: ${q.id})\n`;
+      output += `문제:\n${q.question}\n\n`;
+
+      if (Array.isArray(q.options) && q.options.length > 0) {
+        output += '보기:\n';
+        q.options.forEach((opt, optIdx) => {
+          output += `  ${optIdx + 1}) ${opt}\n`;
+        });
+        output += '\n';
+      }
+
+      output += `정답 / 모범답안:\n${q.answer || '(등록된 정답 또는 모범답안 없음)'}\n\n`;
+
+      if (q.explanation) {
+        output += `해설 / 풀이:\n${q.explanation}\n\n`;
+      }
+
+      output += '--------------------------------------------------------------------------------\n\n';
+    });
+
+    return output;
+  }
+
+  function downloadQuestionsAsTxt(questions, filenamePrefix = '출제문제_기록') {
+    if (!questions || questions.length === 0) {
+      showToast('저장할 출제 문제 내역이 없습니다.', 'error');
+      return;
+    }
+
+    const textContent = formatQuestionsAsText(questions, filenamePrefix === '시험지_문제목록' ? '시험지 문제 목록' : '출제 문제 누적 이력');
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const filename = `${filenamePrefix}_${dateStr}.txt`;
+
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(`${questions.length}개의 문제가 ${filename} 파일로 저장되었습니다.`, 'success');
+  }
+
   // 필터 변경 이벤트
   const filterElements = [filterExam, filterSubject, filterType, filterDifficulty].filter(Boolean);
   filterElements.forEach(el => {
@@ -306,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function resetAll() {
     engine.setQuestions([]);
+    questionHistory.length = 0;
     dataBadge.className = 'data-status-badge empty';
     dataBadge.innerHTML = '<span>데이터 미등록</span>';
     fileInfoText.textContent = '준비된 파일이 없으신가요? 샘플 문제를 불러와 즉시 체험해보세요.';
@@ -322,6 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     engine.resetSeen();
     updateSeenStatus();
+    updateHistoryStatus();
 
     renderEmptyState('데이터를 업로드하거나 <strong>\'샘플 불러오기\'</strong>를 클릭하세요.');
     showToast('모든 데이터와 화면이 초기화되었습니다.', 'info');
@@ -329,6 +422,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnHeaderReset) btnHeaderReset.addEventListener('click', resetAll);
   if (btnResetData) btnResetData.addEventListener('click', resetAll);
+  if (btnExportHistoryTxt) {
+    btnExportHistoryTxt.addEventListener('click', () => {
+      downloadQuestionsAsTxt(questionHistory, '출제문제_누적이력');
+    });
+  }
 
   // ==========================================================================
   // 파일 업로드 및 샘플 로드 처리
@@ -428,7 +526,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnResetSeen.addEventListener('click', () => {
     engine.resetSeen();
+    questionHistory.length = 0;
     updateSeenStatus();
+    updateHistoryStatus();
     showToast('풀이 완료한 문제 이력이 초기화되었습니다.', 'info');
   });
 
@@ -456,6 +556,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (result.seenReset) {
       showToast('모든 문제를 이미 풀이하여, 중복 제외 목록을 초기화하고 새로 추출했습니다.', 'info');
     }
+
+    // 출제된 문제를 누적 이력(questionHistory)에 추가
+    result.items.forEach(item => {
+      questionHistory.push(item);
+    });
+    updateHistoryStatus();
 
     latestPickedResult = result;
 
@@ -498,43 +604,64 @@ document.addEventListener('DOMContentLoaded', () => {
       q.difficulty ? `<span class="badge badge-difficulty difficulty-${escapeHtml(q.difficulty)}">${escapeHtml(q.difficulty)}</span>` : ''
     ].filter(Boolean).join('');
 
-    card.innerHTML = `
-      <div class="card-header">
-        <div class="badge-group">
-          ${badgesHtml}
+      const seenProgressInfo = checkExcludeSeen.checked
+        ? ` (진행: ${engine.seenCount} / ${resultMeta.poolTotal}문제 중복 제외)`
+        : '';
+
+      card.innerHTML = `
+        <div class="card-header">
+          <div class="badge-group">
+            ${badgesHtml}
+          </div>
+          <span class="question-id-tag">ID: ${escapeHtml(q.id)}</span>
         </div>
-        <span class="question-id-tag">ID: ${escapeHtml(q.id)}</span>
-      </div>
 
-      <h3 class="question-title">${escapeHtml(q.title)}</h3>
-      <div class="question-body">${escapeHtml(q.question)}</div>
+        <h3 class="question-title">${escapeHtml(q.title)}</h3>
+        <div class="question-body">${escapeHtml(q.question)}</div>
 
-      ${optionsHtml}
+        ${optionsHtml}
 
-      <div class="answer-box">
-        <button class="answer-toggle-btn" type="button" aria-expanded="false" onclick="toggleAnswer(this)">
-          <span>👁 정답 및 해설 확인</span>
-        </button>
-        <div class="answer-content">
-          <div class="answer-label">정답 / 모범답안</div>
-          <div class="answer-text">${escapeHtml(q.answer || '(등록된 정답 또는 모범답안이 없습니다)')}</div>
-          ${q.explanation ? `
-            <div class="answer-label" style="margin-top: 10px;">해설 / 풀이</div>
-            <div class="explanation-text">${escapeHtml(q.explanation)}</div>
-          ` : ''}
+        <div class="answer-box">
+          <button class="answer-toggle-btn" type="button" aria-expanded="false" onclick="toggleAnswer(this)">
+            <span>👁 정답 및 해설 확인</span>
+          </button>
+          <div class="answer-content">
+            <div class="answer-label">정답 / 모범답안</div>
+            <div class="answer-text">${escapeHtml(q.answer || '(등록된 정답 또는 모범답안이 없습니다)')}</div>
+            ${q.explanation ? `
+              <div class="answer-label" style="margin-top: 10px;">해설 / 풀이</div>
+              <div class="explanation-text">${escapeHtml(q.explanation)}</div>
+            ` : ''}
+          </div>
         </div>
-      </div>
 
-      <div class="single-nav-bar">
-        <span class="dropzone-subtext">추출 풀: 총 ${resultMeta.poolTotal}문제 중 무작위 선택</span>
-        <button id="btn-next-single" class="btn btn-primary" type="button">
-          <span>다음 랜덤 문제 🎲</span>
-        </button>
-      </div>
-    `;
+        <div class="single-nav-bar">
+          <span class="dropzone-subtext">추출 대상: 총 ${resultMeta.poolTotal}문제${seenProgressInfo}</span>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button id="btn-single-save-current-txt" class="btn btn-outline" type="button" title="현재 출제된 1문제를 TXT 파일로 저장합니다.">
+              <span>💾 현재 문제 TXT</span>
+            </button>
+            <button id="btn-single-save-all-txt" class="btn btn-secondary" type="button" title="지금까지 출제된 모든 누적 문제(${questionHistory.length}개)를 TXT 파일로 저장합니다.">
+              <span>💾 누적 이력 TXT (${questionHistory.length})</span>
+            </button>
+            <button id="btn-next-single" class="btn btn-primary" type="button">
+              <span>다음 랜덤 문제 🎲</span>
+            </button>
+          </div>
+        </div>
+      `;
 
     resultsContainer.innerHTML = '';
     resultsContainer.appendChild(card);
+
+    // TXT 저장 이벤트
+    card.querySelector('#btn-single-save-current-txt').addEventListener('click', () => {
+      downloadQuestionsAsTxt([q], `문제_${q.id || '단일'}`);
+    });
+
+    card.querySelector('#btn-single-save-all-txt').addEventListener('click', () => {
+      downloadQuestionsAsTxt(questionHistory, '출제문제_누적이력');
+    });
 
     // 다음 문제 버튼 이벤트
     card.querySelector('#btn-next-single').addEventListener('click', () => {
@@ -563,6 +690,12 @@ document.addEventListener('DOMContentLoaded', () => {
         </button>
         <button id="btn-copy-exam" class="btn btn-secondary" type="button">
           <span>📋 텍스트 복사</span>
+        </button>
+        <button id="btn-download-multi-txt" class="btn btn-outline" type="button" title="현재 시험지에 추출된 문제들을 TXT 파일로 저장합니다.">
+          <span>💾 시험지 TXT 저장</span>
+        </button>
+        <button id="btn-download-multi-history-txt" class="btn btn-secondary" type="button" title="지금까지 출제된 모든 누적 문제(${questionHistory.length}개)를 TXT 파일로 저장합니다.">
+          <span>💾 누적 이력 TXT (${questionHistory.length})</span>
         </button>
         <button id="btn-print-exam" class="btn btn-primary" type="button">
           <span>🖨️ 시험지 인쇄</span>
@@ -643,6 +776,16 @@ document.addEventListener('DOMContentLoaded', () => {
       wrapper.querySelectorAll('.answer-toggle-btn').forEach(btn => {
         btn.setAttribute('aria-expanded', String(allExpanded));
       });
+    });
+
+    // 시험지 TXT 저장 이벤트
+    wrapper.querySelector('#btn-download-multi-txt').addEventListener('click', () => {
+      downloadQuestionsAsTxt(questions, '시험지_문제목록');
+    });
+
+    // 누적 이력 TXT 저장 이벤트
+    wrapper.querySelector('#btn-download-multi-history-txt').addEventListener('click', () => {
+      downloadQuestionsAsTxt(questionHistory, '출제문제_누적이력');
     });
 
     // 인쇄 이벤트

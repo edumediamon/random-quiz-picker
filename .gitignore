@@ -1,0 +1,8 @@
+# Dependency / runtime
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Build / publish artifacts
+.publish/
+backup/

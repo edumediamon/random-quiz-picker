@@ -282,6 +282,64 @@ function parseAuto(content, filename = '') {
   return parseCSVQuestions(trimmed);
 }
 
+/**
+ * 문제 목록을 사람이 읽기 편한 구조화된 텍스트(TXT) 문서로 변환
+ * @param {Array<Object>} questions 변환할 문제 객체 배열
+ * @param {string} title 문서 헤더 제목
+ * @param {Object} options 부가 설정 (예: 고정 일시 등)
+ * @returns {string} 서식화된 TXT 문자열
+ */
+function formatQuestionsAsText(questions, title = '출제 문제 기록', options = {}) {
+  const dateObj = options.date || new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const timestampStr = options.timestampStr || `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())} ${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}:${pad(dateObj.getSeconds())}`;
+
+  let output = '';
+  output += '================================================================================\n';
+  output += `[랜덤 문제 추출기] ${title}\n`;
+  output += `저장 일시: ${timestampStr}\n`;
+  output += `총 출제 문항 수: ${Array.isArray(questions) ? questions.length : 0}문항\n`;
+  output += '================================================================================\n\n';
+
+  if (!Array.isArray(questions) || questions.length === 0) {
+    output += '(출제된 문제 내역이 없습니다.)\n';
+    return output;
+  }
+
+  questions.forEach((q, idx) => {
+    const tags = [
+      q.exam ? `자격증/시험: ${q.exam}` : '',
+      q.subject ? `관련 영역: ${q.subject}` : '',
+      q.type ? `유형: ${q.type}` : '',
+      q.difficulty ? `난이도: ${q.difficulty}` : ''
+    ].filter(Boolean).join(' | ');
+
+    output += `[문항 ${idx + 1}]`;
+    if (tags) output += ` (${tags})`;
+    output += '\n';
+    output += `제목: ${q.title || '무제'} (ID: ${q.id || idx + 1})\n`;
+    output += `문제:\n${q.question || ''}\n\n`;
+
+    if (Array.isArray(q.options) && q.options.length > 0) {
+      output += '보기:\n';
+      q.options.forEach((opt, optIdx) => {
+        output += `  ${optIdx + 1}) ${opt}\n`;
+      });
+      output += '\n';
+    }
+
+    output += `정답 / 모범답안:\n${q.answer || '(등록된 정답 또는 모범답안 없음)'}\n\n`;
+
+    if (q.explanation) {
+      output += `해설 / 풀이:\n${q.explanation}\n\n`;
+    }
+
+    output += '--------------------------------------------------------------------------------\n\n';
+  });
+
+  return output;
+}
+
 // 브라우저 및 Node.js 겸용 내보내기
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -292,6 +350,7 @@ if (typeof module !== 'undefined' && module.exports) {
     parseCSVQuestions,
     parseJSONQuestions,
     parseAuto,
+    formatQuestionsAsText,
     KEY_ALIASES
   };
 } else if (typeof window !== 'undefined') {
@@ -303,6 +362,7 @@ if (typeof module !== 'undefined' && module.exports) {
     parseCSVQuestions,
     parseJSONQuestions,
     parseAuto,
+    formatQuestionsAsText,
     KEY_ALIASES
   };
 }

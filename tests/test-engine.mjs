@@ -16,7 +16,8 @@ const {
   parseCSVToRows,
   parseCSVQuestions,
   parseJSONQuestions,
-  parseAuto
+  parseAuto,
+  formatQuestionsAsText
 } = require('../js/parser.js');
 
 const { QuizEngine } = require('../js/quiz-engine.js');
@@ -128,6 +129,19 @@ assert.strictEqual(pickMulti.items.length, 5);
 const idSet = new Set(pickMulti.items.map(item => item.id));
 assert.strictEqual(idSet.size, 5, '추출된 5개 문항에 중복이 없어야 함');
 console.log('✓ 1문제 및 N문제 랜덤 무작위 추출 통과');
+
+console.log('--- 5. 출제 문제 TXT 파일 포맷터 단위 테스트 ---');
+const txtOutput = formatQuestionsAsText(pickMulti.items, '단위테스트 출제 기록');
+assert.ok(txtOutput.includes('[랜덤 문제 추출기] 단위테스트 출제 기록'), '헤더 타이틀 확인');
+assert.ok(txtOutput.includes('총 출제 문항 수: 5문항'), '문항 수 확인');
+assert.ok(txtOutput.includes('[문항 1]'), '첫 번째 문항 마커 확인');
+assert.ok(txtOutput.includes('정답 / 모범답안:'), '정답/모범답안 섹션 확인');
+assert.ok(txtOutput.includes('===================='), '구분선 확인');
+
+// 빈 목록 처리 검증
+const emptyTxt = formatQuestionsAsText([], '빈 목록');
+assert.ok(emptyTxt.includes('(출제된 문제 내역이 없습니다.)'), '빈 문제 목록 안전 메시지 확인');
+console.log('✓ 출제 문제 TXT 포맷터 테스트 통과');
 
 console.log('\n==================================');
 console.log('모든 자동화 단위 테스트가 성공했습니다!');
