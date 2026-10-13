@@ -1,0 +1,18 @@
+{
+  "name": "random-quiz-picker",
+  "version": "1.0.0",
+  "description": "조건별 맞춤 무작위 문제 은행 및 중복 방지 추출기",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests/test-engine.mjs"
+  },
+  "keywords": [
+    "quiz",
+    "exam",
+    "random-picker",
+    "study"
+  ],
+  "author": "jay Park",
+  "license": "MIT"
+}

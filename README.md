@@ -16,7 +16,15 @@
 - **모던 비주얼 & 다크/라이트 테마**: 글래스모피즘과 세련된 색상 팔레트, 반응형 레이아웃을 제공합니다.
 
 ## 실행 방법
-`index.html` 파일을 선호하는 웹 브라우저(Chrome, Edge 등)로 더블클릭하여 실행하거나, VS Code Live Server / 로컬 웹 서버로 열면 됩니다.
+1. **로컬 서버 실행 (추천 - `history.txt` 자동 파일 연동)**:
+   터미널에서 아래 명령을 실행하면 프로젝트 폴더(`@random-quiz-picker`) 안에 `history.txt` 파일이 자동으로 생성 및 누적되며, 브라우저를 껐다 켜도 이 파일의 문제들이 중복 제외 목록으로 자동 유지됩니다.
+   ```bash
+   npm start
+   # 또는: node server.js
+   # 브라우저 접속: http://localhost:3000
+   ```
+2. **독립 브라우저 실행**:
+   별도 서버 없이 `index.html` 파일을 웹 브라우저(Chrome, Edge 등)로 더블클릭하여 바로 사용할 수도 있습니다. 이 경우 브라우저 내부 로컬 저장소(LocalStorage) 및 수동 TXT 다운로드 버튼으로 연동됩니다.
 
 ## 문제 데이터 작성 가이드
 `data/sample-questions.json` 및 `data/sample-questions.csv` 파일을 예제로 참고하여 작성할 수 있습니다.

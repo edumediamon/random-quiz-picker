@@ -6,3 +6,6 @@ Thumbs.db
 # Build / publish artifacts
 .publish/
 backup/
+
+# Local study history
+history.txt

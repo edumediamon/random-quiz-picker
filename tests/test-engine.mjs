@@ -143,6 +143,22 @@ const emptyTxt = formatQuestionsAsText([], '빈 목록');
 assert.ok(emptyTxt.includes('(출제된 문제 내역이 없습니다.)'), '빈 문제 목록 안전 메시지 확인');
 console.log('✓ 출제 문제 TXT 포맷터 테스트 통과');
 
+console.log('--- 6. history.txt 중복 방지 파일 파서 및 포맷터 단위 테스트 ---');
+const { parseSeenIdsFromHistoryFile, formatQuestionsForHistoryFile } = require('../server.js');
+const historyChunk = formatQuestionsForHistoryFile([
+  { id: 'hist-01', title: '테스트1', question: '질문1', answer: '답1' },
+  { id: 'hist-02', title: '테스트2', question: '질문2', answer: '답2' }
+], 0);
+
+assert.ok(historyChunk.includes('[기록 1] ID: hist-01'));
+assert.ok(historyChunk.includes('[기록 2] ID: hist-02'));
+
+const parsedIds = parseSeenIdsFromHistoryFile(historyChunk);
+assert.strictEqual(parsedIds.length, 2, 'history.txt에서 2개 ID 추출');
+assert.ok(parsedIds.includes('hist-01'));
+assert.ok(parsedIds.includes('hist-02'));
+console.log('✓ history.txt 파서 및 포맷터 검증 통과');
+
 console.log('\n==================================');
 console.log('모든 자동화 단위 테스트가 성공했습니다!');
 console.log('==================================');

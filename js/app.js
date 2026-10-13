@@ -159,9 +159,120 @@ document.addEventListener('DOMContentLoaded', () => {
   const seenCountEl = document.getElementById('seen-count');
   const btnExportHistoryTxt = document.getElementById('btn-export-history-txt');
   const historyExportCountEl = document.getElementById('history-export-count');
+  const historyStorageBadge = document.getElementById('history-storage-badge');
+  const historyFileCountEl = document.getElementById('history-file-count');
   const btnPickRandom = document.getElementById('btn-pick-random');
 
   const questionHistory = [];
+
+  // ==========================================================================
+  // history.txt 로컬 서버 및 LocalStorage 연동 동기화
+  // ==========================================================================
+  let isServerConnected = false;
+  const LOCAL_STORAGE_SEEN_KEY = 'quiz_picker_seen_ids';
+  const LOCAL_STORAGE_HIST_KEY = 'quiz_picker_history_questions';
+
+  function loadHistoryFromLocalStorage() {
+    try {
+      const savedSeen = localStorage.getItem(LOCAL_STORAGE_SEEN_KEY);
+      if (savedSeen) {
+        const ids = JSON.parse(savedSeen);
+        if (Array.isArray(ids)) {
+          ids.forEach(id => engine.seenQuestionIds.add(id));
+          updateSeenStatus();
+        }
+      }
+      const savedHist = localStorage.getItem(LOCAL_STORAGE_HIST_KEY);
+      if (savedHist) {
+        const hist = JSON.parse(savedHist);
+        if (Array.isArray(hist) && questionHistory.length === 0) {
+          hist.forEach(q => questionHistory.push(q));
+          updateHistoryStatus();
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage 로드 실패:', e);
+    }
+  }
+
+  function saveHistoryToLocalStorage() {
+    try {
+      const currentSeen = Array.from(engine.seenQuestionIds);
+      localStorage.setItem(LOCAL_STORAGE_SEEN_KEY, JSON.stringify(currentSeen));
+      localStorage.setItem(LOCAL_STORAGE_HIST_KEY, JSON.stringify(questionHistory));
+    } catch (e) {
+      console.warn('LocalStorage 저장 실패:', e);
+    }
+  }
+
+  function clearLocalStorageHistory() {
+    try {
+      localStorage.removeItem(LOCAL_STORAGE_SEEN_KEY);
+      localStorage.removeItem(LOCAL_STORAGE_HIST_KEY);
+    } catch (e) {
+      console.warn('LocalStorage 초기화 실패:', e);
+    }
+  }
+
+  async function checkServerHistorySync() {
+    try {
+      const res = await fetch('/api/history');
+      if (!res.ok) throw new Error('서버 API 미응답');
+      const data = await res.json();
+      if (data.success) {
+        isServerConnected = true;
+        if (Array.isArray(data.seenIds) && data.seenIds.length > 0) {
+          data.seenIds.forEach(id => engine.seenQuestionIds.add(id));
+          updateSeenStatus();
+        }
+        if (historyStorageBadge) {
+          historyStorageBadge.style.display = 'inline-flex';
+          if (historyFileCountEl) historyFileCountEl.textContent = data.count || 0;
+        }
+        if (data.count > 0) {
+          showToast(`📁 history.txt에서 이전 출제된 ${data.count}문제를 불러와 중복에서 제외했습니다.`, 'info');
+        }
+      }
+    } catch (e) {
+      isServerConnected = false;
+      loadHistoryFromLocalStorage();
+    }
+  }
+
+  async function syncQuestionsToServer(questions) {
+    if (!questions || questions.length === 0) return;
+    saveHistoryToLocalStorage();
+
+    if (!isServerConnected) return;
+    try {
+      const res = await fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (historyFileCountEl) historyFileCountEl.textContent = data.totalSeenCount;
+          if (historyStorageBadge) historyStorageBadge.style.display = 'inline-flex';
+          showToast(`📁 history.txt 파일에 출제 이력이 자동 누적되었습니다. (${data.totalSeenCount}문항)`, 'success');
+        }
+      }
+    } catch (err) {
+      console.warn('history.txt 서버 저장 실패:', err);
+    }
+  }
+
+  async function clearServerHistory() {
+    clearLocalStorageHistory();
+    if (!isServerConnected) return;
+    try {
+      await fetch('/api/history', { method: 'DELETE' });
+      if (historyFileCountEl) historyFileCountEl.textContent = '0';
+    } catch (err) {
+      console.warn('history.txt 초기화 요청 실패:', err);
+    }
+  }
 
   const resultsContainer = document.getElementById('results-container');
   const toastContainer = document.getElementById('toast-container');
@@ -413,11 +524,12 @@ document.addEventListener('DOMContentLoaded', () => {
     totalCountEl.textContent = '0';
 
     engine.resetSeen();
+    clearServerHistory();
     updateSeenStatus();
     updateHistoryStatus();
 
     renderEmptyState('데이터를 업로드하거나 <strong>\'샘플 불러오기\'</strong>를 클릭하세요.');
-    showToast('모든 데이터와 화면이 초기화되었습니다.', 'info');
+    showToast('모든 데이터와 history.txt 출제 이력이 초기화되었습니다.', 'info');
   }
 
   if (btnHeaderReset) btnHeaderReset.addEventListener('click', resetAll);
@@ -527,9 +639,10 @@ document.addEventListener('DOMContentLoaded', () => {
   btnResetSeen.addEventListener('click', () => {
     engine.resetSeen();
     questionHistory.length = 0;
+    clearServerHistory();
     updateSeenStatus();
     updateHistoryStatus();
-    showToast('풀이 완료한 문제 이력이 초기화되었습니다.', 'info');
+    showToast('풀이 완료한 문제 이력 및 history.txt 파일이 초기화되었습니다.', 'info');
   });
 
   // ==========================================================================
@@ -562,6 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
       questionHistory.push(item);
     });
     updateHistoryStatus();
+    syncQuestionsToServer(result.items);
 
     latestPickedResult = result;
 
@@ -846,4 +960,5 @@ document.addEventListener('DOMContentLoaded', () => {
   // 초기화 실행
   initTheme();
   fetchSampleQuestions();
+  checkServerHistorySync();
 });
