@@ -206,6 +206,21 @@ assert.strictEqual(readHistory(testKey1).exists, false);
 
 console.log('✓ 조건별 history 파일명 생성, 저장, 조회, 삭제 검증 통과');
 
-console.log('\n==================================');
-console.log('모든 자동화 단위 테스트가 성공했습니다!');
-console.log('==================================');
+console.log('--- 7. Google Drive 설정 엔드포인트 (/api/google-config) 단위 테스트 ---');
+const { server } = require('../server.js');
+const testServer = server.listen(0, async () => {
+  const port = testServer.address().port;
+  try {
+    const res = await fetch(`http://localhost:${port}/api/google-config`);
+    assert.strictEqual(res.status, 200, 'HTTP 200 반환');
+    const data = await res.json();
+    assert.ok(typeof data.clientId === 'string', 'clientId 문자열 필드 존재');
+    assert.ok(typeof data.apiKey === 'string', 'apiKey 문자열 필드 존재');
+    console.log('✓ /api/google-config 엔드포인트 테스트 통과');
+  } finally {
+    testServer.close();
+    console.log('\n==================================');
+    console.log('모든 자동화 단위 테스트가 성공했습니다!');
+    console.log('==================================');
+  }
+});

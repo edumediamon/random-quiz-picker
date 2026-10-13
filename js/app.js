@@ -725,6 +725,13 @@ document.addEventListener('DOMContentLoaded', () => {
     googleDriveModal.style.display = 'none';
   }
 
+  // ESC 키로 모달 닫기 (접근성 보장)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && googleDriveModal && googleDriveModal.style.display === 'flex') {
+      closeGoogleModal();
+    }
+  });
+
   if (btnCloseGoogleModal) {
     btnCloseGoogleModal.addEventListener('click', closeGoogleModal);
   }
@@ -766,14 +773,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Google Picker API 로드
-  function loadPickerApi() {
+  // 비동기 스크립트 로드 대기 헬퍼 (async defer 대응)
+  function waitForGlobal(name, timeoutMs = 4000) {
     return new Promise((resolve, reject) => {
-      if (pickerApiLoaded) return resolve();
-      if (typeof window.gapi === 'undefined') {
-        return reject(new Error('Google API 스크립트(gapi)를 불러올 수 없습니다. 인터넷 연결 또는 보안 설정을 확인해주세요.'));
-      }
-      window.gapi.load('picker', {
+      const start = Date.now();
+      const check = () => {
+        if (window[name] !== undefined) return resolve(window[name]);
+        if (Date.now() - start >= timeoutMs) {
+          return reject(new Error(`Google SDK(${name}) 로딩 시간 초과. 네트워크 또는 광고 차단 확장프로그램을 확인해주세요.`));
+        }
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }
+
+  // Google Picker API 로드
+  async function loadPickerApi() {
+    if (pickerApiLoaded) return;
+    const gapi = await waitForGlobal('gapi');
+    return new Promise((resolve, reject) => {
+      gapi.load('picker', {
         callback: () => {
           pickerApiLoaded = true;
           resolve();
@@ -784,11 +804,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Google Identity Services (GIS) 토큰 클라이언트 초기화
-  function initGisClient(clientId) {
-    if (typeof window.google === 'undefined' || !window.google.accounts || !window.google.accounts.oauth2) {
-      throw new Error('Google Identity Services SDK(gsi/client)를 불러올 수 없습니다.');
+  async function initGisClient(clientId) {
+    const google = await waitForGlobal('google');
+    if (!google.accounts || !google.accounts.oauth2) {
+      throw new Error('Google Identity Services SDK(google.accounts.oauth2)를 불러올 수 없습니다.');
     }
-    return window.google.accounts.oauth2.initTokenClient({
+    return google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: GOOGLE_SCOPE,
       callback: (tokenResponse) => {
@@ -898,6 +919,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const content = await res.text();
       const questions = QuizParser.parseAuto(content, fileName);
+      if (!Array.isArray(questions) || questions.length === 0) {
+        showToast(`"${fileName}" 파일에 유효한 문제 데이터가 없거나 형식이 맞지 않습니다.`, 'warning');
+        return;
+      }
       loadQuestions(questions, `Google Drive (${fileName})`, fileName);
     } catch (err) {
       console.error('Google Drive 파일 처리 오류:', err);
