@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>랜덤 문제 추출기 - 조건별 맞춤 무작위 문제 은행</title>
+  <meta name="description" content="JSON 및 CSV 문제 데이터셋을 기반으로 자격증, 과목, 난이도 조건을 설정하여 문제를 무작위로 추출하고 학습하는 독립형 웹 애플리케이션입니다.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 헤더 -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">🎲</div>
+        <div>
+          <h1 class="brand-title">랜덤 문제 추출기</h1>
+          <p class="brand-subtitle">조건별 맞춤 무작위 문제 추출 &amp; 즉석 풀이</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-header-sample" class="btn btn-secondary" type="button" title="기본 샘플 데이터 로드">
+          <span>📦 샘플 불러오기</span>
+        </button>
+        <button id="btn-header-reset" class="btn btn-outline" type="button" title="모든 데이터 및 화면 초기화">
+          <span>🔄 초기화</span>
+        </button>
+        <button id="theme-toggle-btn" class="btn btn-outline btn-icon" type="button" aria-label="테마 전환" title="다크/라이트 테마 전환">
+          <span id="theme-icon">🌙</span>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <!-- 1. 데이터 소스 관리 패널 -->
+      <section class="data-panel" aria-labelledby="data-panel-title">
+        <div class="data-panel-header">
+          <h2 id="data-panel-title" class="section-title">
+            <span>📁 문제 데이터 관리</span>
+          </h2>
+          <span id="data-badge" class="data-status-badge empty">
+            <span>데이터 미등록</span>
+          </span>
+        </div>
+
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="JSON 또는 CSV 파일 업로드 드롭존">
+          <input type="file" id="file-input" accept=".json,.csv" style="display: none;" aria-hidden="true">
+          <div class="dropzone-icon">📥</div>
+          <div class="dropzone-text">JSON 또는 CSV 파일을 이곳에 드래그하거나 클릭하여 업로드</div>
+          <div class="dropzone-subtext">표준 규격의 문제 파일(.json, .csv)을 지원합니다. (UTF-8)</div>
+        </div>
+
+        <div class="data-actions">
+          <span id="file-info-text" class="dropzone-subtext">준비된 파일이 없으신가요? 샘플 문제를 불러와 즉시 체험해보세요.</span>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="btn-load-sample" class="btn btn-secondary" type="button">
+              <span>✨ 기본 샘플 데이터셋 불러오기</span>
+            </button>
+            <button id="btn-reset-data" class="btn btn-outline" type="button" title="등록된 데이터 및 화면 초기화">
+              <span>🗑️ 데이터 비우기</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 필터 조건 패널 -->
+      <section class="data-panel" aria-labelledby="filter-panel-title">
+        <h2 id="filter-panel-title" class="section-title" style="margin-bottom: 16px;">
+          <span>🎯 추출 조건 설정</span>
+        </h2>
+
+        <div class="controls-grid">
+          <div class="form-group">
+            <label for="filter-exam" class="form-label">📜 자격증 / 시험</label>
+            <select id="filter-exam" class="form-select">
+              <option value="ALL">전체 자격증</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="filter-subject" class="form-label">📚 과목 / 관련 영역</label>
+            <select id="filter-subject" class="form-select">
+              <option value="ALL">전체 영역 / 과목</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="filter-type" class="form-label">🏷️ 문제 유형</label>
+            <select id="filter-type" class="form-select">
+              <option value="ALL">전체 유형</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="filter-difficulty" class="form-label">⚡ 난이도</label>
+            <select id="filter-difficulty" class="form-select">
+              <option value="ALL">전체 난이도</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label for="filter-keyword" class="form-label">🔍 키워드 검색</label>
+            <input type="text" id="filter-keyword" class="form-input" placeholder="문제 본문, 관련 영역, 유형, 제목 검색...">
+          </div>
+        </div>
+
+        <div class="filter-stats-bar">
+          <div id="filter-stats">
+            조건에 부합하는 문제: <span id="matched-count" class="matched-count-highlight">0</span>개 / 전체 <span id="total-count">0</span>개
+          </div>
+          <button id="btn-reset-filters" class="btn btn-outline" style="padding: 4px 10px; font-size: 0.8rem;" type="button">
+            필터 초기화
+          </button>
+        </div>
+
+        <!-- 3. 무작위 추출 조작 및 실행 바 -->
+        <div class="picker-action-card">
+          <div class="options-row">
+            <div class="mode-selector" role="tablist" aria-label="추출 모드 선택">
+              <button id="mode-single-btn" class="mode-tab active" role="tab" aria-selected="true" type="button">
+                1문제 즉석 풀이
+              </button>
+              <button id="mode-multi-btn" class="mode-tab" role="tab" aria-selected="false" type="button">
+                N문제 시험지 묶음
+              </button>
+            </div>
+
+            <div id="multi-count-wrapper" class="count-input-group" style="display: none;">
+              <label for="count-select">추출 개수:</label>
+              <select id="count-select" class="count-select">
+                <option value="3">3문제</option>
+                <option value="5" selected>5문제</option>
+                <option value="10">10문제</option>
+                <option value="20">20문제</option>
+                <option value="999">전체 셔플</option>
+              </select>
+            </div>
+
+            <label class="custom-checkbox" title="현재 세션에서 이미 확인한 문제를 제외하고 무작위 추출합니다.">
+              <input type="checkbox" id="check-exclude-seen">
+              <span>중복 문제 제외</span>
+            </label>
+
+            <button id="btn-reset-seen" class="btn btn-outline" style="padding: 6px 10px; font-size: 0.8rem; display: none;" type="button">
+              풀이 이력 초기화 (<span id="seen-count">0</span>)
+            </button>
+          </div>
+
+          <button id="btn-pick-random" class="btn btn-primary btn-hero" type="button">
+            <span>🎲 무작위 문제 가져오기</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 4. 결과 출력 영역 (단일 뷰 또는 다중 뷰) -->
+      <section id="results-container" class="results-container" aria-live="polite">
+        <div class="empty-state">
+          <div class="empty-state-icon">💡</div>
+          <h3 class="empty-state-title">문제를 가져올 준비가 되었습니다</h3>
+          <p>상단의 조건을 선택한 후 <strong>'무작위 문제 가져오기'</strong> 버튼을 클릭하세요.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <p>랜덤 문제 추출기 (Quiz Picker) — 순수 브라우저 독립 실행형 웹 애플리케이션</p>
+    </footer>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="assertive"></div>
+
+  <!-- 스크립트 모듈 로드 -->
+  <script src="js/parser.js"></script>
+  <script src="js/quiz-engine.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

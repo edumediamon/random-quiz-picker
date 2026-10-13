@@ -1,0 +1,706 @@
+/**
+ * app.js
+ * 랜덤 문제 추출기 메인 애플리케이션 DOM 컨트롤러
+ */
+
+// 내장 기본 백업 샘플 (file:// 로컬 프로토콜에서 fetch 차단 시 즉각 동작 보장)
+const EMBEDDED_SAMPLE_DATA = [
+  {
+    id: "excel-01",
+    exam: "컴퓨터활용능력 2급",
+    subject: "스프레드시트",
+    type: "수식 작성",
+    difficulty: "기초",
+    title: "조건에 맞는 합계 구하기",
+    question: "A1:D8은 제목행을 포함한 직원 표입니다. D열은 근태점수이며 B1:B2에는 '직위', '과장'이 입력되어 있습니다. 조건에 맞는 근태점수 합계를 구하는 데이터베이스 함수를 작성하세요. 필드는 열 번호 4로 지정합니다.",
+    options: [
+      "=DSUM(A1:D8, 4, B1:B2)",
+      "=SUMIF(B1:B2, \"과장\", D1:D8)",
+      "=DAVERAGE(A1:D8, 4, B1:B2)",
+      "=SUM(A1:D8, 4)"
+    ],
+    answer: "=DSUM(A1:D8, 4, B1:B2)",
+    explanation: "DSUM 함수는 지정한 조건에 맞는 레코드의 합계를 계산합니다. 형식은 DSUM(데이터범위, 열번호, 조건범위)입니다."
+  },
+  {
+    id: "excel-02",
+    exam: "컴퓨터활용능력 2급",
+    subject: "스프레드시트",
+    type: "계산형",
+    difficulty: "기초",
+    title: "숫자가 입력된 셀 개수 세기",
+    question: "A1:A6 범위에 10, '서울', 빈 셀, 20, '부산', 30이 입력되어 있습니다. =COUNT(A1:A6) 수식의 실행 결과는 얼마인가요?",
+    options: ["2", "3", "5", "6"],
+    answer: "3",
+    explanation: "COUNT 함수는 범위 내에서 숫자가 들어있는 셀의 개수만 셉니다. 10, 20, 30 총 3개입니다."
+  },
+  {
+    id: "excel-03",
+    exam: "컴퓨터활용능력 2급",
+    subject: "스프레드시트",
+    type: "수식 작성",
+    difficulty: "보통",
+    title: "평균 및 반올림 함수 조합",
+    question: "B2:B5의 평균값을 구한 뒤 소수점 둘째 자리까지 반올림하여 표시하는 수식을 작성하세요.",
+    options: [
+      "=ROUND(AVERAGE(B2:B5), 2)",
+      "=AVERAGE(ROUND(B2:B5, 2))",
+      "=ROUNDUP(AVERAGE(B2:B5), 2)",
+      "=TRUNC(AVERAGE(B2:B5), 2)"
+    ],
+    answer: "=ROUND(AVERAGE(B2:B5), 2)",
+    explanation: "AVERAGE로 평균을 구한 후 ROUND 함수의 자릿수 인수로 2를 지정하여 소수 둘째 자리까지 표시합니다."
+  },
+  {
+    id: "info-01",
+    exam: "정보처리기사",
+    subject: "데이터베이스",
+    type: "SQL 작성",
+    difficulty: "기초",
+    title: "전체 테이블 조회 SQL",
+    question: "employees 테이블의 모든 열과 모든 행을 조회하는 표준 SQL 문을 작성하세요.",
+    options: [
+      "SELECT * FROM employees;",
+      "SHOW * FROM employees;",
+      "GET ALL FROM employees;",
+      "FIND * IN employees;"
+    ],
+    answer: "SELECT * FROM employees;",
+    explanation: "SELECT 절에 와일드카드(*)를 지정하고 FROM 절에 대상 테이블명을 지정합니다."
+  },
+  {
+    id: "info-02",
+    exam: "정보처리기사",
+    subject: "데이터베이스",
+    type: "단답형",
+    difficulty: "기초",
+    title: "트랜잭션 ACID 특성",
+    question: "트랜잭션의 모든 연산이 완전히 수행되거나 전혀 수행되지 않아야 한다는 성질(All or Nothing)을 무엇이라 하는가?",
+    options: [
+      "원자성(Atomicity)",
+      "일관성(Consistency)",
+      "격리성(Isolation)",
+      "영속성(Durability)"
+    ],
+    answer: "원자성(Atomicity)",
+    explanation: "원자성(Atomicity)은 트랜잭션을 더 이상 분할할 수 없는 하나의 논리적 단위로 처리하는 특성입니다."
+  },
+  {
+    id: "info-03",
+    exam: "정보처리기사",
+    subject: "데이터베이스",
+    type: "단답형",
+    difficulty: "보통",
+    title: "중복 제거 키워드",
+    question: "SELECT 질의 결과에서 중복된 행을 제거하고 유일한 레코드만 조회할 때 사용하는 SQL 키워드는 무엇인가?",
+    options: ["DISTINCT", "UNIQUE", "GROUP BY", "LIMIT"],
+    answer: "DISTINCT",
+    explanation: "SELECT DISTINCT 컬럼명 FROM 테이블 형식으로 사용합니다."
+  },
+  {
+    id: "elec-01",
+    exam: "전기기사",
+    subject: "전기설비 계산",
+    type: "계산형",
+    difficulty: "기초",
+    title: "단상 부하의 유효전력",
+    question: "단상 교류 회로에서 전압 220V, 전류 10A, 역률이 0.8일 때 유효전력(W)은 얼마인가?",
+    options: ["1760W", "2200W", "1320W", "2750W"],
+    answer: "1760W",
+    explanation: "단상 유효전력 P = V * I * cosθ = 220 * 10 * 0.8 = 1760W 입니다."
+  },
+  {
+    id: "history-01",
+    exam: "한국사능력검정",
+    subject: "근현대사",
+    type: "객관식",
+    difficulty: "기초",
+    title: "3·1 운동의 연도",
+    question: "일제 강점기 비폭력 만세 운동이자 대한민국 임시정부 수립의 도화선이 된 3·1 운동이 일어난 해는?",
+    options: ["1919년", "1910년", "1926년", "1945년"],
+    answer: "1919년",
+    explanation: "3·1 만세 운동은 1919년 3월 1일 고종 황제의 인산일을 기해 전국적으로 일어났습니다."
+  }
+];
+
+document.addEventListener('DOMContentLoaded', () => {
+  // 인스턴스 초기화
+  const engine = new QuizEngine();
+  let currentMode = 'single'; // 'single' 또는 'multi'
+  let latestPickedResult = null;
+
+  // DOM 요소 참조
+  const themeToggleBtn = document.getElementById('theme-toggle-btn');
+  const themeIcon = document.getElementById('theme-icon');
+  const btnLoadSample = document.getElementById('btn-load-sample');
+  const btnHeaderSample = document.getElementById('btn-header-sample');
+  const btnHeaderReset = document.getElementById('btn-header-reset');
+  const btnResetData = document.getElementById('btn-reset-data');
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const dataBadge = document.getElementById('data-badge');
+  const fileInfoText = document.getElementById('file-info-text');
+
+  const filterExam = document.getElementById('filter-exam');
+  const filterSubject = document.getElementById('filter-subject');
+  const filterType = document.getElementById('filter-type');
+  const filterDifficulty = document.getElementById('filter-difficulty');
+  const filterKeyword = document.getElementById('filter-keyword');
+  const btnResetFilters = document.getElementById('btn-reset-filters');
+  const matchedCountEl = document.getElementById('matched-count');
+  const totalCountEl = document.getElementById('total-count');
+
+  const modeSingleBtn = document.getElementById('mode-single-btn');
+  const modeMultiBtn = document.getElementById('mode-multi-btn');
+  const multiCountWrapper = document.getElementById('multi-count-wrapper');
+  const countSelect = document.getElementById('count-select');
+  const checkExcludeSeen = document.getElementById('check-exclude-seen');
+  const btnResetSeen = document.getElementById('btn-reset-seen');
+  const seenCountEl = document.getElementById('seen-count');
+  const btnPickRandom = document.getElementById('btn-pick-random');
+
+  const resultsContainer = document.getElementById('results-container');
+  const toastContainer = document.getElementById('toast-container');
+
+  // ==========================================================================
+  // 토스트 메시지 함수
+  // ==========================================================================
+  function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    const icon = type === 'success' ? '✓' : type === 'error' ? '⚠' : 'ℹ';
+    toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+    toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(20px)';
+      toast.style.transition = 'all 0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+    }, 3200);
+  }
+
+  // ==========================================================================
+  // 테마 관리 (다크 / 라이트)
+  // ==========================================================================
+  function initTheme() {
+    const savedTheme = localStorage.getItem('quiz_picker_theme') || 'dark';
+    setTheme(savedTheme);
+  }
+
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    themeIcon.textContent = theme === 'dark' ? '🌙' : '☀️';
+    localStorage.setItem('quiz_picker_theme', theme);
+  }
+
+  themeToggleBtn.addEventListener('click', () => {
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+  });
+
+  // ==========================================================================
+  // 데이터 로드 및 필터 갱신
+  // ==========================================================================
+  function loadQuestions(questions, sourceName = '데이터') {
+    engine.setQuestions(questions);
+
+    // 뱃지 상태 업데이트
+    dataBadge.className = 'data-status-badge';
+    dataBadge.innerHTML = `<span>● ${sourceName} (${engine.totalCount}문제)</span>`;
+    fileInfoText.textContent = `현재 등록된 문제: 총 ${engine.totalCount}개`;
+
+    // 필터 옵션 채우기
+    populateFilters();
+    updateMatchedCount();
+    updateSeenStatus();
+
+    showToast(`${sourceName} ${engine.totalCount}문제를 성공적으로 불러왔습니다.`, 'success');
+  }
+
+  function populateFilters() {
+    const options = engine.getFilterOptions();
+
+    // 현재 선택값 보존
+    const prevExam = filterExam.value;
+    const prevSubject = filterSubject.value;
+    const prevType = filterType ? filterType.value : 'ALL';
+    const prevDiff = filterDifficulty.value;
+
+    // 자격증 선택상자
+    filterExam.innerHTML = '<option value="ALL">전체 자격증 / 시험</option>' +
+      options.exams.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
+
+    // 과목 / 관련 영역 선택상자
+    filterSubject.innerHTML = '<option value="ALL">전체 영역 / 과목</option>' +
+      options.subjects.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+
+    // 유형 선택상자
+    if (filterType) {
+      filterType.innerHTML = '<option value="ALL">전체 유형</option>' +
+        options.types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    }
+
+    // 난이도 선택상자
+    filterDifficulty.innerHTML = '<option value="ALL">전체 난이도</option>' +
+      options.difficulties.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+
+    // 이전 값 복원
+    if (options.exams.includes(prevExam)) filterExam.value = prevExam;
+    if (options.subjects.includes(prevSubject)) filterSubject.value = prevSubject;
+    if (filterType && options.types.includes(prevType)) filterType.value = prevType;
+    if (options.difficulties.includes(prevDiff)) filterDifficulty.value = prevDiff;
+  }
+
+  function getActiveFilters() {
+    return {
+      exam: filterExam.value,
+      subject: filterSubject.value,
+      type: filterType ? filterType.value : 'ALL',
+      difficulty: filterDifficulty.value,
+      keyword: filterKeyword.value
+    };
+  }
+
+  function updateMatchedCount() {
+    const filtered = engine.filterQuestions(getActiveFilters());
+    matchedCountEl.textContent = filtered.length;
+    totalCountEl.textContent = engine.totalCount;
+  }
+
+  function updateSeenStatus() {
+    seenCountEl.textContent = engine.seenCount;
+    btnResetSeen.style.display = engine.seenCount > 0 ? 'inline-flex' : 'none';
+  }
+
+  // 필터 변경 이벤트
+  const filterElements = [filterExam, filterSubject, filterType, filterDifficulty].filter(Boolean);
+  filterElements.forEach(el => {
+    el.addEventListener('change', updateMatchedCount);
+  });
+  filterKeyword.addEventListener('input', updateMatchedCount);
+
+  btnResetFilters.addEventListener('click', () => {
+    filterExam.value = 'ALL';
+    filterSubject.value = 'ALL';
+    if (filterType) filterType.value = 'ALL';
+    filterDifficulty.value = 'ALL';
+    filterKeyword.value = '';
+    updateMatchedCount();
+    showToast('필터 조건이 초기화되었습니다.', 'info');
+  });
+
+  // ==========================================================================
+  // 빈 상태 렌더링 및 전체 초기화 함수
+  // ==========================================================================
+  function renderEmptyState(message = '상단의 조건을 선택한 후 <strong>\'무작위 문제 가져오기\'</strong> 버튼을 클릭하세요.') {
+    resultsContainer.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">💡</div>
+        <h3 class="empty-state-title">문제를 가져올 준비가 되었습니다</h3>
+        <p>${message}</p>
+      </div>
+    `;
+  }
+
+  function resetAll() {
+    engine.setQuestions([]);
+    dataBadge.className = 'data-status-badge empty';
+    dataBadge.innerHTML = '<span>데이터 미등록</span>';
+    fileInfoText.textContent = '준비된 파일이 없으신가요? 샘플 문제를 불러와 즉시 체험해보세요.';
+    fileInput.value = '';
+
+    filterExam.innerHTML = '<option value="ALL">전체 자격증 / 시험</option>';
+    filterSubject.innerHTML = '<option value="ALL">전체 영역 / 과목</option>';
+    if (filterType) filterType.innerHTML = '<option value="ALL">전체 유형</option>';
+    filterDifficulty.innerHTML = '<option value="ALL">전체 난이도</option>';
+    filterKeyword.value = '';
+
+    matchedCountEl.textContent = '0';
+    totalCountEl.textContent = '0';
+
+    engine.resetSeen();
+    updateSeenStatus();
+
+    renderEmptyState('데이터를 업로드하거나 <strong>\'샘플 불러오기\'</strong>를 클릭하세요.');
+    showToast('모든 데이터와 화면이 초기화되었습니다.', 'info');
+  }
+
+  if (btnHeaderReset) btnHeaderReset.addEventListener('click', resetAll);
+  if (btnResetData) btnResetData.addEventListener('click', resetAll);
+
+  // ==========================================================================
+  // 파일 업로드 및 샘플 로드 처리
+  // ==========================================================================
+  async function fetchSampleQuestions() {
+    try {
+      const res = await fetch('data/sample-questions.json');
+      if (!res.ok) throw new Error('파일 응답 실패');
+      const data = await res.json();
+      const questions = QuizParser.parseJSONQuestions(data);
+      loadQuestions(questions, '표준 샘플 문제셋');
+    } catch (err) {
+      // 로컬 파일 시스템(file://) 등에서 fetch 불가 시 내장 백업 데이터 즉시 로드
+      console.warn('Fetch 실패, 내장 샘플 데이터로 전환:', err);
+      const parsed = QuizParser.parseJSONQuestions(EMBEDDED_SAMPLE_DATA);
+      loadQuestions(parsed, '내장 샘플 문제셋');
+    }
+  }
+
+  btnLoadSample.addEventListener('click', fetchSampleQuestions);
+  btnHeaderSample.addEventListener('click', fetchSampleQuestions);
+
+  // 드롭존 클릭 시 파일 선택창 열기
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+
+  // 드래그 앤 드롭 이벤트
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('dragover');
+  });
+
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('dragover');
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      handleUploadedFile(e.dataTransfer.files[0]);
+    }
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+      handleUploadedFile(e.target.files[0]);
+    }
+  });
+
+  function handleUploadedFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      try {
+        const content = event.target.result;
+        const questions = QuizParser.parseAuto(content, file.name);
+        loadQuestions(questions, `업로드 파일 (${file.name})`);
+      } catch (err) {
+        showToast(`파일 파싱 오류: ${err.message}`, 'error');
+      }
+    };
+
+    reader.onerror = () => {
+      showToast('파일을 읽는 도중 오류가 발생했습니다.', 'error');
+    };
+
+    reader.readAsText(file, 'UTF-8');
+  }
+
+  // ==========================================================================
+  // 모드 전환 및 풀이 이력 관리
+  // ==========================================================================
+  modeSingleBtn.addEventListener('click', () => {
+    currentMode = 'single';
+    modeSingleBtn.classList.add('active');
+    modeSingleBtn.setAttribute('aria-selected', 'true');
+    modeMultiBtn.classList.remove('active');
+    modeMultiBtn.setAttribute('aria-selected', 'false');
+    multiCountWrapper.style.display = 'none';
+  });
+
+  modeMultiBtn.addEventListener('click', () => {
+    currentMode = 'multi';
+    modeMultiBtn.classList.add('active');
+    modeMultiBtn.setAttribute('aria-selected', 'true');
+    modeSingleBtn.classList.remove('active');
+    modeSingleBtn.setAttribute('aria-selected', 'false');
+    multiCountWrapper.style.display = 'flex';
+  });
+
+  btnResetSeen.addEventListener('click', () => {
+    engine.resetSeen();
+    updateSeenStatus();
+    showToast('풀이 완료한 문제 이력이 초기화되었습니다.', 'info');
+  });
+
+  // ==========================================================================
+  // 무작위 문제 추출 실행
+  // ==========================================================================
+  btnPickRandom.addEventListener('click', () => {
+    if (engine.totalCount === 0) {
+      showToast('먼저 문제 데이터를 업로드하거나 샘플을 불러오세요.', 'error');
+      return;
+    }
+
+    const filters = getActiveFilters();
+    const count = currentMode === 'single' ? 1 : parseInt(countSelect.value, 10);
+    const excludeSeen = checkExcludeSeen.checked;
+
+    const result = engine.pickRandom(filters, count, { excludeSeen });
+    updateSeenStatus();
+
+    if (result.items.length === 0) {
+      showToast(result.message || '조건에 일치하는 문제가 없습니다.', 'error');
+      return;
+    }
+
+    if (result.seenReset) {
+      showToast('모든 문제를 이미 풀이하여, 중복 제외 목록을 초기화하고 새로 추출했습니다.', 'info');
+    }
+
+    latestPickedResult = result;
+
+    if (currentMode === 'single') {
+      renderSingleQuestion(result.items[0], result);
+    } else {
+      renderMultiQuestions(result.items, result);
+    }
+  });
+
+  // ==========================================================================
+  // 렌더링 함수: 1문제 즉석 풀이 뷰
+  // ==========================================================================
+  function renderSingleQuestion(q, resultMeta) {
+    const card = document.createElement('article');
+    card.className = 'question-card';
+    card.setAttribute('aria-label', `문제: ${q.title || q.id}`);
+
+    const hasOptions = Array.isArray(q.options) && q.options.length > 0;
+
+    let optionsHtml = '';
+    if (hasOptions) {
+      optionsHtml = `
+        <div class="options-list" role="list">
+          ${q.options.map((opt, idx) => `
+            <div class="option-item" role="listitem" tabindex="0" onclick="this.classList.toggle('selected')">
+              <span class="option-number">${idx + 1}</span>
+              <span class="option-text">${escapeHtml(opt)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // 뱃지 목록 생성
+    const badgesHtml = [
+      q.exam ? `<span class="badge badge-exam">${escapeHtml(q.exam)}</span>` : '',
+      q.subject ? `<span class="badge badge-subject">${escapeHtml(q.subject)}</span>` : '',
+      q.type ? `<span class="badge badge-type">${escapeHtml(q.type)}</span>` : '',
+      q.difficulty ? `<span class="badge badge-difficulty difficulty-${escapeHtml(q.difficulty)}">${escapeHtml(q.difficulty)}</span>` : ''
+    ].filter(Boolean).join('');
+
+    card.innerHTML = `
+      <div class="card-header">
+        <div class="badge-group">
+          ${badgesHtml}
+        </div>
+        <span class="question-id-tag">ID: ${escapeHtml(q.id)}</span>
+      </div>
+
+      <h3 class="question-title">${escapeHtml(q.title)}</h3>
+      <div class="question-body">${escapeHtml(q.question)}</div>
+
+      ${optionsHtml}
+
+      <div class="answer-box">
+        <button class="answer-toggle-btn" type="button" aria-expanded="false" onclick="toggleAnswer(this)">
+          <span>👁 정답 및 해설 확인</span>
+        </button>
+        <div class="answer-content">
+          <div class="answer-label">정답 / 모범답안</div>
+          <div class="answer-text">${escapeHtml(q.answer || '(등록된 정답 또는 모범답안이 없습니다)')}</div>
+          ${q.explanation ? `
+            <div class="answer-label" style="margin-top: 10px;">해설 / 풀이</div>
+            <div class="explanation-text">${escapeHtml(q.explanation)}</div>
+          ` : ''}
+        </div>
+      </div>
+
+      <div class="single-nav-bar">
+        <span class="dropzone-subtext">추출 풀: 총 ${resultMeta.poolTotal}문제 중 무작위 선택</span>
+        <button id="btn-next-single" class="btn btn-primary" type="button">
+          <span>다음 랜덤 문제 🎲</span>
+        </button>
+      </div>
+    `;
+
+    resultsContainer.innerHTML = '';
+    resultsContainer.appendChild(card);
+
+    // 다음 문제 버튼 이벤트
+    card.querySelector('#btn-next-single').addEventListener('click', () => {
+      btnPickRandom.click();
+    });
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ==========================================================================
+  // 렌더링 함수: N문제 시험지 묶음 뷰
+  // ==========================================================================
+  function renderMultiQuestions(questions, resultMeta) {
+    const wrapper = document.createElement('div');
+
+    // 상단 툴바
+    const toolbar = document.createElement('div');
+    toolbar.className = 'multi-view-header';
+    toolbar.innerHTML = `
+      <div class="multi-view-title">
+        <span>📑 무작위 추출 문제지 (${questions.length}문제)</span>
+      </div>
+      <div class="multi-view-actions">
+        <button id="btn-toggle-all-answers" class="btn btn-outline" type="button">
+          <span>모든 정답 토글</span>
+        </button>
+        <button id="btn-copy-exam" class="btn btn-secondary" type="button">
+          <span>📋 텍스트 복사</span>
+        </button>
+        <button id="btn-print-exam" class="btn btn-primary" type="button">
+          <span>🖨️ 시험지 인쇄</span>
+        </button>
+      </div>
+    `;
+    wrapper.appendChild(toolbar);
+
+    // 문제 리스트
+    questions.forEach((q, index) => {
+      const card = document.createElement('article');
+      card.className = 'question-card';
+      card.setAttribute('aria-label', `문제 ${index + 1}: ${q.title}`);
+
+      const hasOptions = Array.isArray(q.options) && q.options.length > 0;
+      let optionsHtml = '';
+      if (hasOptions) {
+        optionsHtml = `
+          <div class="options-list" role="list">
+            ${q.options.map((opt, idx) => `
+              <div class="option-item" role="listitem" tabindex="0" onclick="this.classList.toggle('selected')">
+                <span class="option-number">${idx + 1}</span>
+                <span class="option-text">${escapeHtml(opt)}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      const badgesHtml = [
+        q.exam ? `<span class="badge badge-exam">${escapeHtml(q.exam)}</span>` : '',
+        q.subject ? `<span class="badge badge-subject">${escapeHtml(q.subject)}</span>` : '',
+        q.type ? `<span class="badge badge-type">${escapeHtml(q.type)}</span>` : '',
+        q.difficulty ? `<span class="badge badge-difficulty difficulty-${escapeHtml(q.difficulty)}">${escapeHtml(q.difficulty)}</span>` : ''
+      ].filter(Boolean).join('');
+
+      card.innerHTML = `
+        <div class="card-header">
+          <div class="badge-group">
+            ${badgesHtml}
+          </div>
+          <span class="question-id-tag">#${index + 1} (${escapeHtml(q.id)})</span>
+        </div>
+
+        <h3 class="question-title">${index + 1}. ${escapeHtml(q.title)}</h3>
+        <div class="question-body">${escapeHtml(q.question)}</div>
+
+        ${optionsHtml}
+
+        <div class="answer-box">
+          <button class="answer-toggle-btn" type="button" aria-expanded="false" onclick="toggleAnswer(this)">
+            <span>👁 정답 및 해설 확인</span>
+          </button>
+          <div class="answer-content">
+            <div class="answer-label">정답 / 모범답안</div>
+            <div class="answer-text">${escapeHtml(q.answer || '(등록된 정답 또는 모범답안이 없습니다)')}</div>
+            ${q.explanation ? `
+              <div class="answer-label" style="margin-top: 10px;">해설 / 풀이</div>
+              <div class="explanation-text">${escapeHtml(q.explanation)}</div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+      wrapper.appendChild(card);
+    });
+
+    resultsContainer.innerHTML = '';
+    resultsContainer.appendChild(wrapper);
+
+    // 일괄 정답 토글 이벤트
+    let allExpanded = false;
+    wrapper.querySelector('#btn-toggle-all-answers').addEventListener('click', () => {
+      allExpanded = !allExpanded;
+      wrapper.querySelectorAll('.answer-content').forEach(el => {
+        if (allExpanded) el.classList.add('show');
+        else el.classList.remove('show');
+      });
+      wrapper.querySelectorAll('.answer-toggle-btn').forEach(btn => {
+        btn.setAttribute('aria-expanded', String(allExpanded));
+      });
+    });
+
+    // 인쇄 이벤트
+    wrapper.querySelector('#btn-print-exam').addEventListener('click', () => {
+      window.print();
+    });
+
+    // 텍스트 클립보드 복사 이벤트
+    wrapper.querySelector('#btn-copy-exam').addEventListener('click', () => {
+      const formattedText = questions.map((q, idx) => {
+        const tags = [q.exam, q.subject, q.type, q.difficulty].filter(Boolean).join(' / ');
+        let text = `[문제 ${idx + 1}]`;
+        if (tags) text += ` (${tags})`;
+        text += `\n제목: ${q.title}\n본문: ${q.question}\n`;
+        if (q.options && q.options.length > 0) {
+          text += `보기:\n${q.options.map((opt, i) => `  ${i + 1}) ${opt}`).join('\n')}\n`;
+        }
+        text += `정답 / 모범답안: ${q.answer}\n`;
+        if (q.explanation) {
+          text += `해설: ${q.explanation}\n`;
+        }
+        return text;
+      }).join('\n----------------------------------------\n\n');
+
+      navigator.clipboard.writeText(formattedText)
+        .then(() => showToast('문제와 정답이 클립보드에 복사되었습니다.', 'success'))
+        .catch(() => showToast('클립보드 복사에 실패했습니다.', 'error'));
+    });
+
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ==========================================================================
+  // 유틸리티 함수
+  // ==========================================================================
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  window.toggleAnswer = function (button) {
+    const content = button.nextElementSibling;
+    const isShowing = content.classList.contains('show');
+    if (isShowing) {
+      content.classList.remove('show');
+      button.setAttribute('aria-expanded', 'false');
+    } else {
+      content.classList.add('show');
+      button.setAttribute('aria-expanded', 'true');
+    }
+  };
+
+  // 초기화 실행
+  initTheme();
+  fetchSampleQuestions();
+});
