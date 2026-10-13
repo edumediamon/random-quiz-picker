@@ -238,6 +238,25 @@ const testServer = server.listen(0, async () => {
     console.log('✓ /api/google-config 엔드포인트 테스트 통과');
   } finally {
     testServer.close();
+
+    console.log('--- 8. type_label_question 및 area_label 포함 복합 CSV 파싱 단위 테스트 ---');
+    const complexCSV = `id,area_number,area_label,type,number_label,type_label_question,model_answer
+q1,1,영역 1. 실무 기본 절차,약술형,Q1.,"[약술형]
+업무 수행 절차와 규정을 확인하는 방법을 서술하시오.","★ 모범답안
+적용되는 규정을 우선 확인하고 세부 절차에 따라 순서대로 진행한다."
+q2,1,영역 1. 실무 기본 절차,절차·판단형,Q2.,"[절차·판단형]
+다음 업무를 수행할 때 확인해야 할 기준과 처리 순서를 쓰시오: 자격 요건을 충족하는가","★ 모범답안
+필요 요건을 점검한 뒤 증빙 자료와 일치하는지 확인한다."`;
+
+    const parsedQuestions = parseCSVQuestions(complexCSV);
+    assert.strictEqual(parsedQuestions.length, 2, '2문항 파싱 성공');
+    assert.strictEqual(parsedQuestions[0].id, 'q1');
+    assert.strictEqual(parsedQuestions[0].subject, '영역 1. 실무 기본 절차', 'area_label -> subject 매핑');
+    assert.strictEqual(parsedQuestions[0].type, '약술형', 'type 매핑');
+    assert.ok(parsedQuestions[0].question.includes('업무 수행 절차와 규정을 확인하는 방법'), 'type_label_question -> question 매핑');
+    assert.ok(parsedQuestions[0].answer.includes('모범답안'), 'model_answer -> answer 매핑');
+    console.log('✓ type_label_question & area_label 복합 CSV 파서 테스트 통과');
+
     console.log('\n==================================');
     console.log('모든 자동화 단위 테스트가 성공했습니다!');
     console.log('==================================');

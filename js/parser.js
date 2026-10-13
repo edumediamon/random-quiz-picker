@@ -6,16 +6,24 @@
 const KEY_ALIASES = {
   id: ['id', '번호', '문제번호', '문항번호', 'no'],
   exam: ['exam', '시험', '자격증', '시험명', '자격증명', '출처', '기출', 'source'],
-  subject: ['subject', '과목', '영역', '관련영역', '관련 영역', '분야', '대영역', '중영역', '소영역', '단원', 'category', 'domain', 'area'],
+  subject: [
+    'subject', '과목', '영역', '관련영역', '관련 영역', '분야', '대영역', '중영역', '소영역', '단원',
+    'category', 'domain', 'area', 'area_label', 'arealabel', 'area_name', 'areaname', 'area_desc'
+  ],
   type: ['type', '유형', '문제유형', '문제 유형', '문항유형', '문항 유형', '질문유형', '질문 유형', '포맷', 'format', 'questionType', 'itemType'],
   difficulty: ['difficulty', '난이도', '수준', '등급', 'level'],
-  title: ['title', '제목', '소제목', '주제', '문제제목'],
-  question: ['question', '문제', '본문', '문항', '질문', '문제본문', '지문', 'body', 'content', 'prompt', 'text'],
+  title: ['title', '제목', '소제목', '주제', '문제제목', 'number_label', 'numberlabel', 'q_label', 'label'],
+  question: [
+    'question', '문제', '본문', '문항', '질문', '문제본문', '지문',
+    'type_label_question', 'typelabelquestion', 'label_question', 'labelquestion',
+    'question_text', 'questionText', 'question_content', 'questionContent',
+    'body', 'content', 'prompt', 'text', 'problem', 'quiz', 'item', 'desc', 'description'
+  ],
   options: ['options', '보기', '선택지', '항목', '선지', 'choices'],
   answer: [
     'answer', '정답', '답', '해답',
     '모범답안', '모범 답안', '모범정답', '모범 정답',
-    'solution', 'correct_answer', 'correctAnswer', 'model_answer', 'modelAnswer'
+    'solution', 'correct_answer', 'correctAnswer', 'model_answer', 'modelAnswer', 'model_ans', 'correct'
   ],
   explanation: [
     'explanation', '해설', '풀이', '설명',
@@ -117,6 +125,23 @@ function findCanonicalKey(headerName) {
       return canonical;
     }
   }
+
+  // 지능형 패턴 매칭 Fallback (복합 컬럼명 대응: 예 type_label_question, area_label 등)
+  if (clean.includes('question') || clean.includes('문제본문') || clean.includes('지문')) {
+    if (!clean.includes('type') || clean.includes('labelquestion') || clean.endsWith('question')) {
+      return 'question';
+    }
+  }
+  if (clean.includes('arealabel') || clean.includes('areaname') || clean.includes('과목명') || clean.includes('영역명')) {
+    return 'subject';
+  }
+  if (clean.includes('numberlabel') || clean.includes('qlabel')) {
+    return 'title';
+  }
+  if (clean.includes('modelanswer') || clean.includes('정답') || clean.includes('모범답')) {
+    return 'answer';
+  }
+
   return null;
 }
 
