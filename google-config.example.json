@@ -1,0 +1,5 @@
+{
+  "_comment": "이 파일을 'google-config.json'으로 복사한 뒤 실제 발급받은 키를 입력하세요.",
+  "clientId": "your-google-oauth-client-id.apps.googleusercontent.com",
+  "apiKey": "AIzaSyYourGoogleCloudApiKey"
+}

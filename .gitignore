@@ -10,3 +10,8 @@ backup/
 # Local study history
 history.txt
 history/
+
+# Local Google Cloud credentials
+.env
+google-config.json
+

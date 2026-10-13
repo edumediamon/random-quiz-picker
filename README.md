@@ -27,6 +27,25 @@
 2. **독립 브라우저 실행**:
    별도 서버 없이 `index.html` 파일을 웹 브라우저(Chrome, Edge 등)로 더블클릭하여 바로 사용할 수도 있습니다. 이 경우 브라우저 내부 로컬 저장소(LocalStorage) 및 수동 TXT 다운로드 버튼으로 연동됩니다.
 
+## Google Drive 연동 설정 파일 가이드
+Google Drive 연동에 필요한 `Google OAuth Client ID`와 `API Key`는 아래의 **두 가지 방법 중 하나**로 설정할 수 있습니다.
+- **방법 1. 설정 파일 사용 (로컬 서버 구동 시 권장)**:
+  - **옵션 A (.env 파일)**: 프로젝트 루트의 [.env.example](file:///d:/dev/random-quiz-picker/.env.example)을 복사하여 `.env` 파일을 생성하고 아래와 같이 키를 입력합니다.
+    ```env
+    GOOGLE_CLIENT_ID=123456789-abcdef.apps.googleusercontent.com
+    GOOGLE_API_KEY=AIzaSyYourApiKeyHere
+    ```
+  - **옵션 B (google-config.json 파일)**: 프로젝트 루트의 [google-config.example.json](file:///d:/dev/random-quiz-picker/google-config.example.json)을 복사하여 `google-config.json` 파일을 생성하고 아래와 같이 입력합니다.
+    ```json
+    {
+      "clientId": "123456789-abcdef.apps.googleusercontent.com",
+      "apiKey": "AIzaSyYourApiKeyHere"
+    }
+    ```
+  - ※ `.env` 및 `google-config.json`은 `.gitignore`에 등록되어 있어 Git 커밋 시 외부에 노출되지 않습니다.
+- **방법 2. 웹 UI 화면에서 직접 입력**:
+  - 웹 화면 데이터 관리 패널에서 `[⚙️ Drive 설정]` 버튼을 클릭하여 나타나는 모달 창에 Client ID와 API Key를 입력하고 `[저장하기]`를 누르면 브라우저의 `localStorage`에 안전하게 영속 저장됩니다.
+
 ## 문제 데이터 작성 가이드
 `data/sample-questions.json` 및 `data/sample-questions.csv` 파일을 예제로 참고하여 작성할 수 있습니다.
 

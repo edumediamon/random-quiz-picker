@@ -207,7 +207,26 @@ assert.strictEqual(readHistory(testKey1).exists, false);
 console.log('✓ 조건별 history 파일명 생성, 저장, 조회, 삭제 검증 통과');
 
 console.log('--- 7. Google Drive 설정 엔드포인트 (/api/google-config) 단위 테스트 ---');
-const { server } = require('../server.js');
+const { server, loadGoogleConfigFile } = require('../server.js');
+
+// 파일 기반 로드 테스트: 임시 google-config.json 생성 후 확인
+const tempConfigPath = path.join(__dirname, '../google-config.json');
+fs.writeFileSync(tempConfigPath, JSON.stringify({
+  clientId: 'mock-test-client-id.apps.googleusercontent.com',
+  apiKey: 'mock-test-api-key'
+}), 'utf8');
+
+try {
+  const loaded = loadGoogleConfigFile();
+  assert.strictEqual(loaded.clientId, 'mock-test-client-id.apps.googleusercontent.com', 'google-config.json에서 clientId 정상 로드');
+  assert.strictEqual(loaded.apiKey, 'mock-test-api-key', 'google-config.json에서 apiKey 정상 로드');
+  console.log('✓ google-config.json 파일 로더 테스트 통과');
+} finally {
+  if (fs.existsSync(tempConfigPath)) {
+    fs.unlinkSync(tempConfigPath);
+  }
+}
+
 const testServer = server.listen(0, async () => {
   const port = testServer.address().port;
   try {

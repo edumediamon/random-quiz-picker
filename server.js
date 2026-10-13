@@ -51,6 +51,49 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml'
 };
 
+/**
+ * .env 파일 또는 google-config.json 파일에서 Google API 설정을 로드
+ * - 파일이 없으면 process.env 값을 기본으로 사용
+ */
+function loadGoogleConfigFile() {
+  let clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+  let apiKey = (process.env.GOOGLE_API_KEY || '').trim();
+
+  // 1. google-config.json 파일 확인
+  const jsonPath = path.join(ROOT_DIR, 'google-config.json');
+  if (fs.existsSync(jsonPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      if (parsed.clientId && !clientId) clientId = String(parsed.clientId).trim();
+      if (parsed.apiKey && !apiKey) apiKey = String(parsed.apiKey).trim();
+    } catch (err) {
+      console.warn('[config] google-config.json 파싱 실패:', err.message);
+    }
+  }
+
+  // 2. .env 파일 확인 (표준 fs 기반 파싱)
+  const envPath = path.join(ROOT_DIR, '.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx === -1) continue;
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+        if (key === 'GOOGLE_CLIENT_ID' && !clientId) clientId = val;
+        if (key === 'GOOGLE_API_KEY' && !apiKey) apiKey = val;
+      }
+    } catch (err) {
+      console.warn('[config] .env 파싱 실패:', err.message);
+    }
+  }
+
+  return { clientId, apiKey };
+}
+
 // ==========================================================================
 // 이력 키 / 파일명
 // ==========================================================================
@@ -364,9 +407,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (pathname === '/api/google-config' && req.method === 'GET') {
+      const config = loadGoogleConfigFile();
       sendJson(res, 200, {
-        clientId: process.env.GOOGLE_CLIENT_ID || '',
-        apiKey: process.env.GOOGLE_API_KEY || ''
+        clientId: config.clientId,
+        apiKey: config.apiKey
       });
       return;
     }
@@ -398,6 +442,7 @@ if (require.main === module) {
 module.exports = {
   server,
   HISTORY_DIR,
+  loadGoogleConfigFile,
   normalizeHistoryKey,
   buildHistoryFileName,
   resolveHistoryPath,
