@@ -143,8 +143,19 @@ const emptyTxt = formatQuestionsAsText([], '빈 목록');
 assert.ok(emptyTxt.includes('(출제된 문제 내역이 없습니다.)'), '빈 문제 목록 안전 메시지 확인');
 console.log('✓ 출제 문제 TXT 포맷터 테스트 통과');
 
-console.log('--- 6. history.txt 중복 방지 파일 파서 및 포맷터 단위 테스트 ---');
-const { parseSeenIdsFromHistoryFile, formatQuestionsForHistoryFile } = require('../server.js');
+console.log('--- 6. 조건별 history 중복 방지 파일 파서 및 포맷터 단위 테스트 ---');
+const {
+  normalizeHistoryKey,
+  buildHistoryFileName,
+  resolveHistoryPath,
+  parseSeenIdsFromHistoryFile,
+  formatQuestionsForHistoryFile,
+  appendHistory,
+  readHistory,
+  deleteHistory,
+  HISTORY_DIR
+} = require('../server.js');
+
 const historyChunk = formatQuestionsForHistoryFile([
   { id: 'hist-01', title: '테스트1', question: '질문1', answer: '답1' },
   { id: 'hist-02', title: '테스트2', question: '질문2', answer: '답2' }
@@ -154,10 +165,46 @@ assert.ok(historyChunk.includes('[기록 1] ID: hist-01'));
 assert.ok(historyChunk.includes('[기록 2] ID: hist-02'));
 
 const parsedIds = parseSeenIdsFromHistoryFile(historyChunk);
-assert.strictEqual(parsedIds.length, 2, 'history.txt에서 2개 ID 추출');
+assert.strictEqual(parsedIds.length, 2, 'history 파일에서 2개 ID 추출');
 assert.ok(parsedIds.includes('hist-01'));
 assert.ok(parsedIds.includes('hist-02'));
-console.log('✓ history.txt 파서 및 포맷터 검증 통과');
+
+// 조건별 파일명 생성 테스트
+const testKey1 = {
+  source: 'my-quiz.json',
+  exam: '정보처리기사',
+  subject: '데이터베이스',
+  type: '단답형',
+  difficulty: '기초'
+};
+const fileName1 = buildHistoryFileName(testKey1);
+assert.strictEqual(fileName1, 'my-quiz.json__정보처리기사__데이터베이스__단답형__기초.txt');
+
+// 'ALL' 조건이 포함된 파일명 생성 테스트
+const testKeyAll = {
+  source: 'sample.json',
+  exam: 'ALL',
+  subject: 'ALL',
+  type: 'ALL',
+  difficulty: 'ALL'
+};
+const fileNameAll = buildHistoryFileName(testKeyAll);
+assert.strictEqual(fileNameAll, 'sample.json__전체자격증__전체영역__전체유형__전체난이도.txt');
+
+// 실제 파일 쓰기/읽기/삭제 검증
+const appendRes = appendHistory(testKey1, [{ id: 'q-unit-01', title: 'DB단위테스트', question: '본문', answer: '답' }]);
+assert.ok(appendRes.seenIds.includes('q-unit-01'));
+
+const readRes = readHistory(testKey1);
+assert.strictEqual(readRes.exists, true);
+assert.ok(readRes.seenIds.includes('q-unit-01'));
+
+// 삭제 검증
+const delRes = deleteHistory(testKey1);
+assert.strictEqual(delRes.existed, true);
+assert.strictEqual(readHistory(testKey1).exists, false);
+
+console.log('✓ 조건별 history 파일명 생성, 저장, 조회, 삭제 검증 통과');
 
 console.log('\n==================================');
 console.log('모든 자동화 단위 테스트가 성공했습니다!');

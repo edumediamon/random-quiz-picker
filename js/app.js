@@ -160,117 +160,166 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnExportHistoryTxt = document.getElementById('btn-export-history-txt');
   const historyExportCountEl = document.getElementById('history-export-count');
   const historyStorageBadge = document.getElementById('history-storage-badge');
+  const historyFileLabelEl = document.getElementById('history-file-label');
   const historyFileCountEl = document.getElementById('history-file-count');
   const btnPickRandom = document.getElementById('btn-pick-random');
 
+  // 현재 세션에서 출제된 문제 목록 (수동 TXT 다운로드용, 조건과 무관하게 누적)
   const questionHistory = [];
 
   // ==========================================================================
-  // history.txt 로컬 서버 및 LocalStorage 연동 동기화
+  // 조건별 출제 이력 (history/ 폴더 또는 LocalStorage)
+  // 이력 키 = 문제 파일 + 자격증 + 영역 + 유형 + 난이도 (검색어는 제외)
   // ==========================================================================
-  let isServerConnected = false;
-  const LOCAL_STORAGE_SEEN_KEY = 'quiz_picker_seen_ids';
-  const LOCAL_STORAGE_HIST_KEY = 'quiz_picker_history_questions';
+  const HISTORY_KEY_FIELDS = ['exam', 'subject', 'type', 'difficulty'];
+  const LOCAL_STORAGE_HISTORY_PREFIX = 'quiz_picker_seen::';
+  const LEGACY_STORAGE_KEYS = ['quiz_picker_seen_ids', 'quiz_picker_history_questions'];
 
-  function loadHistoryFromLocalStorage() {
+  let currentSourceId = null;      // 업로드 파일명 등 이력 분류용 원본 식별자
+  let serverAvailable = null;      // null: 미확인, true/false: 확인됨
+  let activeHistoryKeyStr = null;  // 현재 엔진에 적재된 이력 키
+  let historyLoadToken = 0;        // 늦게 도착한 응답 무시용
+  let historyReady = Promise.resolve();
+
+  // 단일 history.txt 시절의 브라우저 저장값 정리
+  LEGACY_STORAGE_KEYS.forEach(k => {
+    try { localStorage.removeItem(k); } catch (e) { /* 무시 */ }
+  });
+
+  function getHistoryKey() {
+    const filters = getActiveFilters();
+    const key = { source: currentSourceId };
+    HISTORY_KEY_FIELDS.forEach(field => { key[field] = filters[field] || 'ALL'; });
+    return key;
+  }
+
+  function historyKeyToQuery(key) {
+    const params = new URLSearchParams();
+    params.set('source', key.source);
+    HISTORY_KEY_FIELDS.forEach(field => params.set(field, key[field]));
+    return params.toString();
+  }
+
+  function localStorageKeyFor(key) {
+    return LOCAL_STORAGE_HISTORY_PREFIX + JSON.stringify(key);
+  }
+
+  function readLocalSeenIds(key) {
     try {
-      const savedSeen = localStorage.getItem(LOCAL_STORAGE_SEEN_KEY);
-      if (savedSeen) {
-        const ids = JSON.parse(savedSeen);
-        if (Array.isArray(ids)) {
-          ids.forEach(id => engine.seenQuestionIds.add(id));
-          updateSeenStatus();
-        }
-      }
-      const savedHist = localStorage.getItem(LOCAL_STORAGE_HIST_KEY);
-      if (savedHist) {
-        const hist = JSON.parse(savedHist);
-        if (Array.isArray(hist) && questionHistory.length === 0) {
-          hist.forEach(q => questionHistory.push(q));
-          updateHistoryStatus();
-        }
-      }
+      const ids = JSON.parse(localStorage.getItem(localStorageKeyFor(key)) || '[]');
+      return Array.isArray(ids) ? ids : [];
     } catch (e) {
-      console.warn('LocalStorage 로드 실패:', e);
+      return [];
     }
   }
 
-  function saveHistoryToLocalStorage() {
+  function writeLocalSeenIds(key, ids) {
     try {
-      const currentSeen = Array.from(engine.seenQuestionIds);
-      localStorage.setItem(LOCAL_STORAGE_SEEN_KEY, JSON.stringify(currentSeen));
-      localStorage.setItem(LOCAL_STORAGE_HIST_KEY, JSON.stringify(questionHistory));
+      localStorage.setItem(localStorageKeyFor(key), JSON.stringify(Array.from(ids)));
     } catch (e) {
       console.warn('LocalStorage 저장 실패:', e);
     }
   }
 
-  function clearLocalStorageHistory() {
-    try {
-      localStorage.removeItem(LOCAL_STORAGE_SEEN_KEY);
-      localStorage.removeItem(LOCAL_STORAGE_HIST_KEY);
-    } catch (e) {
-      console.warn('LocalStorage 초기화 실패:', e);
-    }
+  function updateHistoryBadge(fileName, count) {
+    if (!historyStorageBadge) return;
+    historyStorageBadge.style.display = 'inline-flex';
+    const label = serverAvailable ? `📁 history/${fileName}` : '💾 브라우저 저장';
+    if (historyFileLabelEl) historyFileLabelEl.textContent = label;
+    if (historyFileCountEl) historyFileCountEl.textContent = count;
+    historyStorageBadge.title = serverAvailable
+      ? `현재 조건의 출제 이력 파일: history/${fileName}`
+      : '로컬 서버 미실행: 브라우저 저장소에 조건별로 보관됩니다.';
   }
 
-  async function checkServerHistorySync() {
-    try {
-      const res = await fetch('/api/history');
-      if (!res.ok) throw new Error('서버 API 미응답');
-      const data = await res.json();
-      if (data.success) {
-        isServerConnected = true;
-        if (Array.isArray(data.seenIds) && data.seenIds.length > 0) {
-          data.seenIds.forEach(id => engine.seenQuestionIds.add(id));
-          updateSeenStatus();
-        }
-        if (historyStorageBadge) {
-          historyStorageBadge.style.display = 'inline-flex';
-          if (historyFileCountEl) historyFileCountEl.textContent = data.count || 0;
-        }
-        if (data.count > 0) {
-          showToast(`📁 history.txt에서 이전 출제된 ${data.count}문제를 불러와 중복에서 제외했습니다.`, 'info');
-        }
+  async function fetchSeenIds(key) {
+    if (serverAvailable !== false) {
+      try {
+        const res = await fetch(`/api/history?${historyKeyToQuery(key)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || '이력 조회 실패');
+        serverAvailable = true;
+        return { seenIds: data.seenIds || [], fileName: data.fileName };
+      } catch (err) {
+        console.warn('조건별 이력 서버 조회 실패, 브라우저 저장소로 전환:', err);
+        serverAvailable = false;
       }
-    } catch (e) {
-      isServerConnected = false;
-      loadHistoryFromLocalStorage();
     }
+    return { seenIds: readLocalSeenIds(key), fileName: null };
   }
 
-  async function syncQuestionsToServer(questions) {
-    if (!questions || questions.length === 0) return;
-    saveHistoryToLocalStorage();
+  /**
+   * 현재 문제 파일/필터 조건에 맞는 이력으로 중복 제외 목록을 교체
+   */
+  function switchHistoryContext() {
+    if (!currentSourceId) {
+      activeHistoryKeyStr = null;
+      engine.resetSeen();
+      updateSeenStatus();
+      if (historyStorageBadge) historyStorageBadge.style.display = 'none';
+      historyReady = Promise.resolve();
+      return historyReady;
+    }
 
-    if (!isServerConnected) return;
+    const key = getHistoryKey();
+    const keyStr = JSON.stringify(key);
+    if (keyStr === activeHistoryKeyStr) return historyReady;
+
+    activeHistoryKeyStr = keyStr;
+    const token = ++historyLoadToken;
+    engine.resetSeen();
+    updateSeenStatus();
+
+    historyReady = fetchSeenIds(key).then(({ seenIds, fileName }) => {
+      if (token !== historyLoadToken) return; // 그 사이 조건이 바뀐 경우 무시
+      seenIds.forEach(id => engine.seenQuestionIds.add(id));
+      updateSeenStatus();
+      updateHistoryBadge(fileName, seenIds.length);
+    });
+    return historyReady;
+  }
+
+  async function persistPickedQuestions(key, questions, resetBeforeAppend) {
+    // 브라우저 저장소에는 항상 같은 키로 보관 (서버 장애 대비)
+    const localIds = resetBeforeAppend ? new Set() : new Set(readLocalSeenIds(key));
+    questions.forEach(q => localIds.add(q.id));
+    writeLocalSeenIds(key, localIds);
+
+    if (!serverAvailable) {
+      if (JSON.stringify(key) === activeHistoryKeyStr) updateHistoryBadge(null, localIds.size);
+      return;
+    }
+
     try {
       const res = await fetch('/api/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questions })
+        body: JSON.stringify({ key, questions, resetBeforeAppend })
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          if (historyFileCountEl) historyFileCountEl.textContent = data.totalSeenCount;
-          if (historyStorageBadge) historyStorageBadge.style.display = 'inline-flex';
-          showToast(`📁 history.txt 파일에 출제 이력이 자동 누적되었습니다. (${data.totalSeenCount}문항)`, 'success');
-        }
-      }
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+      if (JSON.stringify(key) === activeHistoryKeyStr) updateHistoryBadge(data.fileName, data.count);
     } catch (err) {
-      console.warn('history.txt 서버 저장 실패:', err);
+      console.warn('조건별 이력 파일 저장 실패:', err);
+      showToast('이력 파일 저장에 실패했습니다. 브라우저 저장소에는 보관되었습니다.', 'error');
     }
   }
 
-  async function clearServerHistory() {
-    clearLocalStorageHistory();
-    if (!isServerConnected) return;
+  async function clearHistoryForKey(key) {
+    try { localStorage.removeItem(localStorageKeyFor(key)); } catch (e) { /* 무시 */ }
+    if (!serverAvailable) {
+      updateHistoryBadge(null, 0);
+      return;
+    }
     try {
-      await fetch('/api/history', { method: 'DELETE' });
-      if (historyFileCountEl) historyFileCountEl.textContent = '0';
+      const res = await fetch(`/api/history?${historyKeyToQuery(key)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+      updateHistoryBadge(data.fileName, 0);
     } catch (err) {
-      console.warn('history.txt 초기화 요청 실패:', err);
+      console.warn('조건별 이력 초기화 실패:', err);
+      showToast('이력 파일 초기화에 실패했습니다.', 'error');
     }
   }
 
@@ -318,20 +367,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // 데이터 로드 및 필터 갱신
   // ==========================================================================
-  function loadQuestions(questions, sourceName = '데이터') {
+  function loadQuestions(questions, sourceName = '데이터', sourceId = sourceName) {
     engine.setQuestions(questions);
+    currentSourceId = sourceId;
+    activeHistoryKeyStr = null;
 
     // 뱃지 상태 업데이트
     dataBadge.className = 'data-status-badge';
-    dataBadge.innerHTML = `<span>● ${sourceName} (${engine.totalCount}문제)</span>`;
+    dataBadge.innerHTML = `<span>● ${escapeHtml(sourceName)} (${engine.totalCount}문제)</span>`;
     fileInfoText.textContent = `현재 등록된 문제: 총 ${engine.totalCount}개`;
 
     // 필터 옵션 채우기
     populateFilters();
     updateMatchedCount();
-    updateSeenStatus();
+    switchHistoryContext();
 
-    showToast(`${sourceName} ${engine.totalCount}문제를 성공적으로 불러왔습니다.`, 'success');
+    showToast(`${escapeHtml(sourceName)} ${engine.totalCount}문제를 성공적으로 불러왔습니다.`, 'success');
   }
 
   function populateFilters() {
@@ -476,10 +527,13 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(`${questions.length}개의 문제가 ${filename} 파일로 저장되었습니다.`, 'success');
   }
 
-  // 필터 변경 이벤트
+  // 필터 변경 이벤트: 조건이 바뀌면 해당 조건의 이력 파일로 전환
   const filterElements = [filterExam, filterSubject, filterType, filterDifficulty].filter(Boolean);
   filterElements.forEach(el => {
-    el.addEventListener('change', updateMatchedCount);
+    el.addEventListener('change', () => {
+      updateMatchedCount();
+      switchHistoryContext();
+    });
   });
   filterKeyword.addEventListener('input', updateMatchedCount);
 
@@ -490,6 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
     filterDifficulty.value = 'ALL';
     filterKeyword.value = '';
     updateMatchedCount();
+    switchHistoryContext();
     showToast('필터 조건이 초기화되었습니다.', 'info');
   });
 
@@ -523,13 +578,13 @@ document.addEventListener('DOMContentLoaded', () => {
     matchedCountEl.textContent = '0';
     totalCountEl.textContent = '0';
 
-    engine.resetSeen();
-    clearServerHistory();
-    updateSeenStatus();
+    // 메모리 상태만 초기화하고 history/ 폴더의 조건별 기록은 보존한다.
+    currentSourceId = null;
+    switchHistoryContext();
     updateHistoryStatus();
 
     renderEmptyState('데이터를 업로드하거나 <strong>\'샘플 불러오기\'</strong>를 클릭하세요.');
-    showToast('모든 데이터와 history.txt 출제 이력이 초기화되었습니다.', 'info');
+    showToast('화면과 데이터가 초기화되었습니다. (history 폴더의 조건별 기록은 보존됩니다)', 'info');
   }
 
   if (btnHeaderReset) btnHeaderReset.addEventListener('click', resetAll);
@@ -549,12 +604,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) throw new Error('파일 응답 실패');
       const data = await res.json();
       const questions = QuizParser.parseJSONQuestions(data);
-      loadQuestions(questions, '표준 샘플 문제셋');
+      loadQuestions(questions, '표준 샘플 문제셋', 'sample-questions.json');
     } catch (err) {
       // 로컬 파일 시스템(file://) 등에서 fetch 불가 시 내장 백업 데이터 즉시 로드
       console.warn('Fetch 실패, 내장 샘플 데이터로 전환:', err);
       const parsed = QuizParser.parseJSONQuestions(EMBEDDED_SAMPLE_DATA);
-      loadQuestions(parsed, '내장 샘플 문제셋');
+      loadQuestions(parsed, '내장 샘플 문제셋', 'sample-questions.json');
     }
   }
 
@@ -602,7 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const content = event.target.result;
         const questions = QuizParser.parseAuto(content, file.name);
-        loadQuestions(questions, `업로드 파일 (${file.name})`);
+        loadQuestions(questions, `업로드 파일 (${file.name})`, file.name);
       } catch (err) {
         showToast(`파일 파싱 오류: ${err.message}`, 'error');
       }
@@ -636,53 +691,69 @@ document.addEventListener('DOMContentLoaded', () => {
     multiCountWrapper.style.display = 'flex';
   });
 
-  btnResetSeen.addEventListener('click', () => {
+  btnResetSeen.addEventListener('click', async () => {
+    if (!currentSourceId) return;
+    const key = getHistoryKey();
     engine.resetSeen();
     questionHistory.length = 0;
-    clearServerHistory();
     updateSeenStatus();
     updateHistoryStatus();
-    showToast('풀이 완료한 문제 이력 및 history.txt 파일이 초기화되었습니다.', 'info');
+    await clearHistoryForKey(key);
+    showToast('현재 조건의 출제 이력이 초기화되었습니다. (다른 조건의 기록은 유지됩니다)', 'info');
   });
 
   // ==========================================================================
   // 무작위 문제 추출 실행
   // ==========================================================================
-  btnPickRandom.addEventListener('click', () => {
+  let isPicking = false;
+
+  btnPickRandom.addEventListener('click', async () => {
     if (engine.totalCount === 0) {
       showToast('먼저 문제 데이터를 업로드하거나 샘플을 불러오세요.', 'error');
       return;
     }
+    if (isPicking) return; // 연타 시 같은 문제가 중복 기록되는 것을 방지
+    isPicking = true;
 
-    const filters = getActiveFilters();
-    const count = currentMode === 'single' ? 1 : parseInt(countSelect.value, 10);
-    const excludeSeen = checkExcludeSeen.checked;
+    try {
+      // 현재 조건의 이력이 모두 적재된 뒤에 추출
+      await switchHistoryContext();
 
-    const result = engine.pickRandom(filters, count, { excludeSeen });
-    updateSeenStatus();
+      const filters = getActiveFilters();
+      const historyKey = getHistoryKey();
+      const count = currentMode === 'single' ? 1 : parseInt(countSelect.value, 10);
+      const excludeSeen = checkExcludeSeen.checked;
 
-    if (result.items.length === 0) {
-      showToast(result.message || '조건에 일치하는 문제가 없습니다.', 'error');
-      return;
-    }
+      const result = engine.pickRandom(filters, count, { excludeSeen });
+      updateSeenStatus();
 
-    if (result.seenReset) {
-      showToast('모든 문제를 이미 풀이하여, 중복 제외 목록을 초기화하고 새로 추출했습니다.', 'info');
-    }
+      if (result.items.length === 0) {
+        showToast(result.message || '조건에 일치하는 문제가 없습니다.', 'error');
+        return;
+      }
 
-    // 출제된 문제를 누적 이력(questionHistory)에 추가
-    result.items.forEach(item => {
-      questionHistory.push(item);
-    });
-    updateHistoryStatus();
-    syncQuestionsToServer(result.items);
+      if (result.seenReset) {
+        showToast('이 조건의 문제를 모두 풀어 이력을 새로 시작합니다.', 'info');
+      }
 
-    latestPickedResult = result;
+      // 세션 누적 목록(수동 TXT 다운로드용)
+      result.items.forEach(item => questionHistory.push(item));
+      updateHistoryStatus();
 
-    if (currentMode === 'single') {
-      renderSingleQuestion(result.items[0], result);
-    } else {
-      renderMultiQuestions(result.items, result);
+      latestPickedResult = result;
+
+      if (currentMode === 'single') {
+        renderSingleQuestion(result.items[0], result);
+      } else {
+        renderMultiQuestions(result.items, result);
+      }
+
+      // 조건별 이력 파일 저장. 완료 전에는 다음 추출을 막아 기록 순서를 보장한다.
+      // (검색어로 좁힌 풀에서의 순환은 파일 전체를 비우지 않음)
+      const resetBeforeAppend = result.seenReset && !filters.keyword.trim();
+      await persistPickedQuestions(historyKey, result.items, resetBeforeAppend);
+    } finally {
+      isPicking = false;
     }
   });
 
@@ -960,5 +1031,4 @@ document.addEventListener('DOMContentLoaded', () => {
   // 초기화 실행
   initTheme();
   fetchSampleQuestions();
-  checkServerHistorySync();
 });
