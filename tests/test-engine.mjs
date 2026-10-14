@@ -14,6 +14,8 @@ const require = createRequire(import.meta.url);
 
 const {
   parseCSVToRows,
+  parseRowsToQuestions,
+  parseExcelQuestions,
   parseCSVQuestions,
   parseJSONQuestions,
   parseAuto,
@@ -256,6 +258,81 @@ q2,1,영역 1. 실무 기본 절차,절차·판단형,Q2.,"[절차·판단형]
     assert.ok(parsedQuestions[0].question.includes('업무 수행 절차와 규정을 확인하는 방법'), 'type_label_question -> question 매핑');
     assert.ok(parsedQuestions[0].answer.includes('모범답안'), 'model_answer -> answer 매핑');
     console.log('✓ type_label_question & area_label 복합 CSV 파서 테스트 통과');
+
+    console.log('--- 9. 엑셀(.xlsx, .xls) 파서 단위 테스트 ---');
+    const XLSX = require('../js/xlsx.full.min.js');
+    const wb = XLSX.utils.book_new();
+    const wsData = [
+      ['번호', '자격증', '과목', '유형', '난이도', '문제', '보기', '정답', '해설'],
+      [101, '정보보안기사', '시스템보안', '단답형', '보통', '버퍼 오버플로우 공격을 방지하기 위한 컴파일러 기술은?', '스택가드|ASLR|DEP', '스택가드', 'Stack Canary를 삽입하여 변조를 탐지합니다.'],
+      [102, '정보보안기사', '네트워크보안', '선다형', '심화', 'TCP SYN 플러딩 공격의 대응책으로 알맞은 것은?', 'SYN 쿠키|ICMP 차단', 'SYN 쿠키', '백로그 큐를 채우지 않고 암호화된 쿠키로 연결을 검증합니다.']
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(wb, ws, '문제시트');
+    const excelBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const questionsFromExcel = parseExcelQuestions(excelBuffer, 'sample.xlsx');
+    assert.strictEqual(questionsFromExcel.length, 2, '엑셀에서 2문항 정상 추출');
+    assert.strictEqual(questionsFromExcel[0].exam, '정보보안기사', '자격증 정상 매핑');
+    assert.strictEqual(questionsFromExcel[0].subject, '시스템보안', '과목 정상 매핑');
+    assert.strictEqual(questionsFromExcel[0].answer, '스택가드', '정답 정상 매핑');
+    assert.strictEqual(questionsFromExcel[1].options.length, 2, '보기 2개 분리 확인');
+
+    const wsData2 = [
+      ['번호', '문제', '정답'],
+      [201, '2시트의 첫 번째 문제입니다.', '정답2']
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(wsData2);
+    XLSX.utils.book_append_sheet(wb, ws2, '2영역_계약관리');
+    const multiSheetBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const multiQuestions = parseExcelQuestions(multiSheetBuffer, 'multi.xlsx');
+    assert.strictEqual(multiQuestions.length, 3, '2개 시트에서 총 3문항 정상 합산 추출');
+    assert.strictEqual(multiQuestions[2].subject, '2영역_계약관리', '시트명이 과목으로 자동 매핑됨');
+    assert.ok(multiQuestions[2].id.includes('2영역_계약관리'), '시트별 ID 고유화 확인');
+
+    const autoParsedExcel = parseAuto(multiSheetBuffer, 'test.xlsx');
+    assert.strictEqual(autoParsedExcel.length, 3, 'parseAuto로 다중 시트 엑셀 자동 파싱 성공');
+    console.log('✓ 엑셀(.xlsx) 다중 시트 파서 단위 테스트 통과');
+
+    console.log('--- 10. 다중 파일(개수 무관) 병합 및 ID 고유화 시뮬레이션 단위 테스트 ---');
+    const filesToMerge = [
+      { name: '1과목.csv', questions: parseCSVQuestions(testCSV) }, // 2문제
+      { name: '2과목.json', questions: userParsed }, // 3문제
+      { name: '3과목.xlsx', questions: questionsFromExcel } // 2문제
+    ];
+
+    const merged = [];
+    const isMultiple = filesToMerge.length > 1;
+    assert.ok(isMultiple, '3개 파일 다중 병합 조건 성립');
+
+    filesToMerge.forEach((fileItem) => {
+      fileItem.questions.forEach((q, qIdx) => {
+        const rawId = q.id !== undefined && q.id !== null && String(q.id).trim() ? String(q.id).trim() : `${qIdx + 1}`;
+        const uniqueId = isMultiple ? `${fileItem.name}__${rawId}` : rawId;
+        merged.push({
+          ...q,
+          id: uniqueId,
+          _sourceFile: fileItem.name
+        });
+      });
+    });
+
+    assert.strictEqual(merged.length, 7, '총 7개 문항 누락 없이 단일 배열로 병합');
+    const idSet = new Set(merged.map(q => q.id));
+    assert.strictEqual(idSet.size, 7, '모든 문항의 합성 ID가 고유함을 보장(충돌 없음)');
+
+    const engine = new QuizEngine();
+    engine.setQuestions(merged);
+    assert.strictEqual(engine.totalCount, 7, '엔진에 7문제 정상 적재');
+    const filterOptions = engine.getFilterOptions();
+    assert.ok(filterOptions.exams.includes('정보보안기사'), '엑셀에서 온 자격증 필터 반영');
+    assert.ok(filterOptions.subjects.includes('스프레드시트 실무'), 'JSON에서 온 영역 필터 반영');
+    assert.ok(filterOptions.subjects.includes('과목A'), 'CSV에서 온 과목 필터 반영');
+
+    const picked = engine.pickRandom({}, 3, { excludeSeen: false });
+    assert.strictEqual(picked.items.length, 3, '다중 파일 통합 문제 풀에서 3문제 무작위 추출 성공');
+    console.log('✓ 다중 파일 병합 및 필터 엔진 무결성 검증 통과');
 
     console.log('\n==================================');
     console.log('모든 자동화 단위 테스트가 성공했습니다!');

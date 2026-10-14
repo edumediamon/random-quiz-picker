@@ -43,11 +43,11 @@
           </span>
         </div>
 
-        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="JSON 또는 CSV 파일 업로드 드롭존">
-          <input type="file" id="file-input" accept=".json,.csv" style="display: none;" aria-hidden="true">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="JSON, CSV 또는 Excel 파일 업로드 드롭존">
+          <input type="file" id="file-input" accept=".json,.csv,.xlsx,.xls" multiple style="display: none;" aria-hidden="true">
           <div class="dropzone-icon">📥</div>
-          <div class="dropzone-text">JSON 또는 CSV 파일을 이곳에 드래그하거나 클릭하여 업로드</div>
-          <div class="dropzone-subtext">표준 규격의 문제 파일(.json, .csv)을 지원합니다. (UTF-8)</div>
+          <div class="dropzone-text">JSON, CSV 또는 Excel(.xlsx, .xls) 파일을 이곳에 드래그하거나 클릭하여 일괄 업로드</div>
+          <div class="dropzone-subtext">파일 개수에 제한 없이 여러 파일 동시 선택 및 다양한 포맷 지원 (UTF-8, Excel)</div>
         </div>
 
         <div class="data-actions">
@@ -217,9 +217,14 @@
           ※ 입력하신 설정값은 브라우저(localStorage)에 안전하게 저장됩니다.
         </div>
       </div>
-      <div class="modal-footer">
-        <button id="btn-clear-google-config" class="btn btn-outline" type="button">설정 초기화</button>
-        <button id="btn-save-google-config" class="btn btn-primary" type="button">저장하기</button>
+      <div class="modal-footer" style="display: flex; gap: 8px; justify-content: space-between; flex-wrap: wrap;">
+        <div>
+          <button id="btn-clear-google-token" class="btn btn-outline" type="button" title="현재 인증된 Google 계정 연결을 해제하고 다른 계정으로 선택합니다.">🔄 계정 전환 / 재로그인</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="btn-clear-google-config" class="btn btn-outline" type="button">설정 초기화</button>
+          <button id="btn-save-google-config" class="btn btn-primary" type="button">저장하기</button>
+        </div>
       </div>
     </div>
   </div>
@@ -229,6 +234,7 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 
   <!-- 스크립트 모듈 로드 -->
+  <script src="js/xlsx.full.min.js"></script>
   <script src="js/parser.js"></script>
   <script src="js/quiz-engine.js"></script>
   <script src="js/app.js"></script>

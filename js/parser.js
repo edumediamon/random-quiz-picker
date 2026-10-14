@@ -211,23 +211,31 @@ function normalizeQuestion(rawObj, fallbackIndex = 1) {
 }
 
 /**
- * CSV 텍스트를 문제 목록 배열로 파싱
+ * 2차원 행 배열(헤더 + 데이터 행)을 문제 목록 객체 배열로 파싱
  */
-function parseCSVQuestions(csvText) {
-  const rows = parseCSVToRows(csvText);
-  if (rows.length < 2) {
-    throw new Error('CSV 파일에 헤더와 최소 1개 이상의 데이터 행이 필요합니다.');
+function parseRowsToQuestions(rows, sourceName = '') {
+  if (!Array.isArray(rows) || rows.length < 2) {
+    throw new Error('데이터에 헤더와 최소 1개 이상의 데이터 행이 필요합니다.');
   }
 
-  const headers = rows[0];
+  const headers = rows[0].map(h => (h !== undefined && h !== null ? String(h).trim() : ''));
   const questions = [];
 
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
+    if (!row || (Array.isArray(row) && row.length === 0)) continue;
     const rawObj = {};
+    let hasAnyValue = false;
+
     headers.forEach((header, colIndex) => {
-      rawObj[header] = row[colIndex] !== undefined ? row[colIndex] : '';
+      if (!header) return;
+      const val = row[colIndex];
+      const strVal = val !== undefined && val !== null ? String(val).trim() : '';
+      if (strVal) hasAnyValue = true;
+      rawObj[header] = strVal;
     });
+
+    if (!hasAnyValue) continue;
 
     const question = normalizeQuestion(rawObj, r);
     if (question.question) {
@@ -240,6 +248,80 @@ function parseCSVQuestions(csvText) {
   }
 
   return questions;
+}
+
+/**
+ * CSV 텍스트를 문제 목록 배열로 파싱
+ */
+function parseCSVQuestions(csvText) {
+  const rows = parseCSVToRows(csvText);
+  return parseRowsToQuestions(rows);
+}
+
+/**
+ * 엑셀(.xlsx, .xls) 바이너리 또는 ArrayBuffer 데이터를 문제 목록 배열로 파싱
+ */
+function parseExcelQuestions(data, filename = '') {
+  let xlsxObj = typeof XLSX !== 'undefined' ? XLSX : null;
+  if (!xlsxObj && typeof require !== 'undefined') {
+    try {
+      xlsxObj = require('./xlsx.full.min.js');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  if (!xlsxObj) {
+    throw new Error('엑셀 파서(SheetJS/XLSX) 라이브러리가 로드되지 않았습니다.');
+  }
+
+  let readOpts = { type: 'binary', raw: false };
+  if (data instanceof ArrayBuffer) {
+    readOpts = { type: 'array', raw: false };
+  } else if (typeof Uint8Array !== 'undefined' && data instanceof Uint8Array) {
+    readOpts = { type: 'array', raw: false };
+  } else if (typeof data === 'string') {
+    readOpts = { type: 'binary', raw: false };
+  }
+
+  const workbook = xlsxObj.read(data, readOpts);
+  const sheetNames = workbook.SheetNames;
+  if (!sheetNames || sheetNames.length === 0) {
+    throw new Error('엑셀 파일에 시트가 존재하지 않습니다.');
+  }
+
+  const allQuestions = [];
+  for (const sName of sheetNames) {
+    const worksheet = workbook.Sheets[sName];
+    if (!worksheet) continue;
+    const rows = xlsxObj.utils.sheet_to_json(worksheet, { header: 1, defval: '', blankrows: false, raw: false });
+    if (Array.isArray(rows) && rows.length >= 2) {
+      try {
+        const sheetQuestions = parseRowsToQuestions(rows, sName);
+        if (sheetQuestions.length > 0) {
+          sheetQuestions.forEach((q) => {
+            // 시트별 분리를 위해 과목/영역이 비어있으면 시트명을 과목으로 지정
+            if (!q.subject) {
+              q.subject = sName;
+            }
+            if (sheetNames.length > 1) {
+              q._sheetName = sName;
+              q.id = `${sName}__${q.id}`;
+            }
+          });
+          allQuestions.push(...sheetQuestions);
+        }
+      } catch (err) {
+        // 유효한 문제 행이 없는 부가 시트는 통과
+      }
+    }
+  }
+
+  if (allQuestions.length === 0) {
+    throw new Error(`"${filename || '엑셀 파일'}"에 유효한 문제가 포함되어 있지 않습니다. 문제(question) 열을 확인하세요.`);
+  }
+
+  return allQuestions;
 }
 
 /**
@@ -290,11 +372,17 @@ function parseJSONQuestions(jsonData) {
 }
 
 /**
- * 파일 확장자나 내용에 따라 자동으로 CSV/JSON 판단하여 파싱
+ * 파일 확장자나 내용에 따라 자동으로 Excel/CSV/JSON 판단하여 파싱
  */
-function parseAuto(content, filename = '') {
-  const trimmed = (content || '').trim();
-  const lowerName = filename.toLowerCase();
+function parseAuto(contentOrData, filename = '') {
+  const lowerName = (filename || '').toLowerCase();
+
+  // 엑셀 확장자이거나 바이너리/ArrayBuffer 데이터인 경우
+  if (lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || contentOrData instanceof ArrayBuffer || (typeof Uint8Array !== 'undefined' && contentOrData instanceof Uint8Array)) {
+    return parseExcelQuestions(contentOrData, filename);
+  }
+
+  const trimmed = typeof contentOrData === 'string' ? contentOrData.trim() : '';
 
   if (lowerName.endsWith('.json') || trimmed.startsWith('[') || trimmed.startsWith('{')) {
     try {
@@ -369,6 +457,8 @@ function formatQuestionsAsText(questions, title = '출제 문제 기록', option
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     parseCSVToRows,
+    parseRowsToQuestions,
+    parseExcelQuestions,
     normalizeKeyName,
     findCanonicalKey,
     normalizeQuestion,
@@ -381,6 +471,8 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof window !== 'undefined') {
   window.QuizParser = {
     parseCSVToRows,
+    parseRowsToQuestions,
+    parseExcelQuestions,
     normalizeKeyName,
     findCanonicalKey,
     normalizeQuestion,

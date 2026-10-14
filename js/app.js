@@ -646,36 +646,101 @@ document.addEventListener('DOMContentLoaded', () => {
   dropzone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropzone.classList.remove('dragover');
-    if (e.dataTransfer.files.length > 0) {
-      handleUploadedFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleUploadedFiles(Array.from(e.dataTransfer.files));
     }
   });
 
   fileInput.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) {
-      handleUploadedFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleUploadedFiles(Array.from(e.target.files));
+      fileInput.value = ''; // 동일 파일 재선택 허용
     }
   });
 
-  function handleUploadedFile(file) {
-    if (!file) return;
-    const reader = new FileReader();
+  async function handleUploadedFiles(files) {
+    if (!files || files.length === 0) return;
 
-    reader.onload = (event) => {
-      try {
-        const content = event.target.result;
-        const questions = QuizParser.parseAuto(content, file.name);
-        loadQuestions(questions, `업로드 파일 (${file.name})`, file.name);
-      } catch (err) {
-        showToast(`파일 파싱 오류: ${err.message}`, 'error');
+    if (files.length === 1) {
+      showToast(`"${files[0].name}" 파일을 읽는 중...`, 'info');
+    } else {
+      showToast(`${files.length}개 파일을 읽어 병합하는 중...`, 'info');
+    }
+
+    const readPromises = files.map((file) => {
+      return new Promise((resolve) => {
+        const lowerName = file.name.toLowerCase();
+        const isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+          try {
+            const data = event.target.result;
+            const questions = QuizParser.parseAuto(data, file.name);
+            if (!Array.isArray(questions) || questions.length === 0) {
+              resolve({ success: false, fileName: file.name, error: '유효한 문제 데이터가 없습니다.' });
+            } else {
+              resolve({ success: true, fileName: file.name, questions });
+            }
+          } catch (err) {
+            resolve({ success: false, fileName: file.name, error: err.message });
+          }
+        };
+
+        reader.onerror = () => {
+          resolve({ success: false, fileName: file.name, error: '파일 읽기 오류' });
+        };
+
+        if (isExcel) {
+          reader.readAsArrayBuffer(file);
+        } else {
+          reader.readAsText(file, 'UTF-8');
+        }
+      });
+    });
+
+    const results = await Promise.all(readPromises);
+    const successful = results.filter(r => r.success);
+    const failed = results.filter(r => !r.success);
+
+    if (failed.length > 0) {
+      const failedMsg = failed.map(f => `"${f.fileName}" (${f.error})`).join(', ');
+      if (successful.length === 0) {
+        showToast(`파일 불러오기 실패: ${failedMsg}`, 'error');
+        return;
+      } else {
+        showToast(`일부 파일 제외됨: ${failedMsg}`, 'warning');
       }
-    };
+    }
 
-    reader.onerror = () => {
-      showToast('파일을 읽는 도중 오류가 발생했습니다.', 'error');
-    };
+    if (successful.length === 0) return;
 
-    reader.readAsText(file, 'UTF-8');
+    // 문제 데이터 병합 및 고유 식별자(ID) 보장
+    const isMultiple = successful.length > 1;
+    const mergedQuestions = [];
+    const fileNames = successful.map(s => s.fileName);
+
+    successful.forEach((item, fileIdx) => {
+      item.questions.forEach((q, qIdx) => {
+        const rawId = q.id !== undefined && q.id !== null && String(q.id).trim() ? String(q.id).trim() : `${qIdx + 1}`;
+        const uniqueId = isMultiple ? `${item.fileName}__${rawId}` : rawId;
+        mergedQuestions.push({
+          ...q,
+          id: uniqueId,
+          _sourceFile: item.fileName
+        });
+      });
+    });
+
+    const sourceName = isMultiple
+      ? `${fileNames.length}개 파일 (${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? ' 외 ' + (fileNames.length - 2) + '개' : ''})`
+      : `업로드 파일 (${fileNames[0]})`;
+
+    const sourceId = isMultiple
+      ? `다중파일_${fileNames.length}개_${fileNames[0].replace(/\.[^/.]+$/, '')}`
+      : fileNames[0];
+
+    loadQuestions(mergedQuestions, sourceName, sourceId);
   }
 
   // ==========================================================================
@@ -773,6 +838,28 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  const btnClearGoogleToken = document.getElementById('btn-clear-google-token');
+  if (btnClearGoogleToken) {
+    btnClearGoogleToken.addEventListener('click', async () => {
+      currentGoogleAccessToken = null;
+      closeGoogleModal();
+      const { clientId } = getGoogleConfig();
+      if (!clientId) {
+        showToast('먼저 Client ID를 설정해주세요.', 'warning');
+        openGoogleModal();
+        return;
+      }
+      showToast('Google 계정 선택 창을 엽니다...', 'info');
+      try {
+        await loadPickerApi();
+        if (!tokenClient) tokenClient = await initGisClient(clientId);
+        tokenClient.requestAccessToken({ prompt: 'select_account' });
+      } catch (err) {
+        showToast(`계정 전환 오류: ${err.message}`, 'error');
+      }
+    });
+  }
+
   // 비동기 스크립트 로드 대기 헬퍼 (async defer 대응)
   function waitForGlobal(name, timeoutMs = 4000) {
     return new Promise((resolve, reject) => {
@@ -846,7 +933,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (currentGoogleAccessToken) {
         createAndShowPicker(currentGoogleAccessToken);
       } else {
-        tokenClient.requestAccessToken({ prompt: '' });
+        tokenClient.requestAccessToken({ prompt: 'select_account' });
       }
     } catch (err) {
       showToast(`Google Drive 연동 실패: ${err.message}`, 'error');
@@ -861,16 +948,22 @@ document.addEventListener('DOMContentLoaded', () => {
   function createAndShowPicker(accessToken) {
     const { apiKey } = getGoogleConfig();
     try {
-      const view = new google.picker.View(google.picker.ViewId.DOCS);
-      view.setMimeTypes('application/json,text/csv,text/plain,application/vnd.google.apps.spreadsheet');
+      // 1. 내 드라이브(My Drive) 전체 파일 및 폴더 뷰 (개인 드라이브 파일 표시)
+      const myDriveView = new google.picker.DocsView()
+        .setIncludeFolders(true);
+
+      // 2. 스프레드시트/엑셀 전용 탭 (내 드라이브의 엑셀 및 구글 시트)
+      const sheetsView = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS)
+        .setIncludeFolders(true);
 
       const builder = new google.picker.PickerBuilder()
-        .enableFeature(google.picker.Feature.NAV_HIDDEN)
+        .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
         .setOAuthToken(accessToken)
-        .addView(view)
+        .addView(myDriveView)
+        .addView(sheetsView)
         .addView(new google.picker.DocsUploadView())
         .setDeveloperKey(apiKey)
-        .setTitle('Google Drive에서 문제 파일(.json, .csv) 선택')
+        .setTitle('Google Drive에서 문제 파일 선택 (다중 선택 가능)')
         .setCallback((data) => handlePickerCallback(data, accessToken));
 
       const picker = builder.build();
@@ -882,7 +975,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Picker에서 파일 선택 후 다운로드 및 파싱
+  // Picker에서 파일 선택 후 다운로드 및 파싱 (단일 및 다중 파일 일괄 지원)
   async function handlePickerCallback(data, accessToken) {
     if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
       return;
@@ -895,17 +988,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const docs = data[google.picker.Response.DOCUMENTS];
     if (!docs || docs.length === 0) return;
 
-    const doc = docs[0];
-    const fileId = doc[google.picker.Document.ID];
-    const fileName = doc[google.picker.Document.NAME] || 'google_drive_file';
-    const mimeType = doc[google.picker.Document.MIME_TYPE] || '';
+    if (docs.length === 1) {
+      showToast(`Google Drive에서 "${docs[0][google.picker.Document.NAME] || '파일'}"을 가져오는 중...`, 'info');
+    } else {
+      showToast(`Google Drive에서 ${docs.length}개 파일을 가져오는 중...`, 'info');
+    }
 
-    showToast(`Google Drive에서 "${fileName}" 파일을 가져오는 중...`, 'info');
+    const fetchPromises = docs.map(async (doc) => {
+      const fileId = doc[google.picker.Document.ID];
+      const fileName = doc[google.picker.Document.NAME] || 'google_drive_file';
+      const mimeType = doc[google.picker.Document.MIME_TYPE] || '';
+      const lowerName = fileName.toLowerCase();
+      const isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls') || mimeType.includes('spreadsheetml') || mimeType.includes('ms-excel');
+      const isGoogleSheet = mimeType === 'application/vnd.google-apps.spreadsheet' || mimeType === 'application/vnd.google.apps.spreadsheet';
 
-    try {
       let downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-      if (mimeType === 'application/vnd.google.apps.spreadsheet') {
-        downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/csv`;
+      if (isGoogleSheet) {
+        // 구글 시트는 CSV로 내보내면 1번째 시트만 추출되므로, 모든 시트 유지를 위해 xlsx로 일괄 내보내기 수행
+        downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`;
       }
 
       const res = await fetch(downloadUrl, {
@@ -917,22 +1017,77 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
           currentGoogleAccessToken = null;
-          throw new Error('Google Drive 접근 권한이 만료되었거나 승인되지 않았습니다. 다시 시도해주세요.');
+          throw new Error('Google Drive 접근 권한이 만료되었습니다. 다시 시도해주세요.');
         }
-        throw new Error(`파일 다운로드 실패 (HTTP ${res.status})`);
+        throw new Error(`다운로드 실패 (HTTP ${res.status})`);
       }
 
-      const content = await res.text();
-      const questions = QuizParser.parseAuto(content, fileName);
-      if (!Array.isArray(questions) || questions.length === 0) {
-        showToast(`"${fileName}" 파일에 유효한 문제 데이터가 없거나 형식이 맞지 않습니다.`, 'warning');
-        return;
+      let payload;
+      if (isExcel || isGoogleSheet) {
+        payload = await res.arrayBuffer();
+      } else {
+        payload = await res.text();
       }
-      loadQuestions(questions, `Google Drive (${fileName})`, fileName);
-    } catch (err) {
-      console.error('Google Drive 파일 처리 오류:', err);
-      showToast(`Google Drive 파일 불러오기 실패: ${err.message}`, 'error');
+
+      const parseFileName = isGoogleSheet && !lowerName.endsWith('.xlsx') ? `${fileName}.xlsx` : fileName;
+      const questions = QuizParser.parseAuto(payload, parseFileName);
+      if (!Array.isArray(questions) || questions.length === 0) {
+        throw new Error('유효한 문제 데이터가 없습니다.');
+      }
+
+      return { fileName, questions };
+    });
+
+    const results = await Promise.allSettled(fetchPromises);
+    const successful = [];
+    const failed = [];
+
+    results.forEach((res, idx) => {
+      const docName = docs[idx][google.picker.Document.NAME] || `파일_${idx + 1}`;
+      if (res.status === 'fulfilled') {
+        successful.push(res.value);
+      } else {
+        failed.push({ fileName: docName, error: res.reason ? res.reason.message : '불러오기 실패' });
+      }
+    });
+
+    if (failed.length > 0) {
+      const failedMsg = failed.map(f => `"${f.fileName}" (${f.error})`).join(', ');
+      if (successful.length === 0) {
+        showToast(`Google Drive 파일 불러오기 실패: ${failedMsg}`, 'error');
+        return;
+      } else {
+        showToast(`일부 파일 제외됨: ${failedMsg}`, 'warning');
+      }
     }
+
+    if (successful.length === 0) return;
+
+    const isMultiple = successful.length > 1;
+    const mergedQuestions = [];
+    const fileNames = successful.map(s => s.fileName);
+
+    successful.forEach((item) => {
+      item.questions.forEach((q, qIdx) => {
+        const rawId = q.id !== undefined && q.id !== null && String(q.id).trim() ? String(q.id).trim() : `${qIdx + 1}`;
+        const uniqueId = isMultiple ? `${item.fileName}__${rawId}` : rawId;
+        mergedQuestions.push({
+          ...q,
+          id: uniqueId,
+          _sourceFile: item.fileName
+        });
+      });
+    });
+
+    const sourceName = isMultiple
+      ? `Google Drive ${fileNames.length}개 (${fileNames.slice(0, 2).join(', ')}${fileNames.length > 2 ? ' 외 ' + (fileNames.length - 2) + '개' : ''})`
+      : `Google Drive (${fileNames[0]})`;
+
+    const sourceId = isMultiple
+      ? `GoogleDrive_${fileNames.length}개_${fileNames[0].replace(/\.[^/.]+$/, '')}`
+      : `GoogleDrive_${fileNames[0]}`;
+
+    loadQuestions(mergedQuestions, sourceName, sourceId);
   }
 
   // ==========================================================================
