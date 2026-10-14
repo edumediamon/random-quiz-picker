@@ -777,11 +777,83 @@ document.addEventListener('DOMContentLoaded', () => {
     return { clientId, apiKey };
   }
 
+  // Origin 감지 및 도움말 모달 DOM 참조
+  const currentOriginDisplay = document.getElementById('current-origin-display');
+  const btnCopyOrigin = document.getElementById('btn-copy-origin');
+  const btnShowOriginHelp = document.getElementById('btn-show-origin-help');
+  const fileProtocolWarning = document.getElementById('file-protocol-warning');
+
+  const modalOriginHelp = document.getElementById('modal-origin-help');
+  const helpOriginDisplay = document.getElementById('help-origin-display');
+  const btnCopyHelpOrigin = document.getElementById('btn-copy-help-origin');
+  const btnCloseOriginHelp = document.getElementById('btn-close-origin-help');
+  const btnConfirmOriginHelp = document.getElementById('btn-confirm-origin-help');
+
+  function getActiveOrigin() {
+    if (window.location.protocol === 'file:') {
+      return 'http://localhost:3000';
+    }
+    return window.location.origin || `${window.location.protocol}//${window.location.host}`;
+  }
+
+  function copyTextToClipboard(text, successMsg = '클립보드에 복사되었습니다.') {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(successMsg, 'success');
+      }).catch(() => {
+        fallbackCopyText(text, successMsg);
+      });
+    } else {
+      fallbackCopyText(text, successMsg);
+    }
+  }
+
+  function fallbackCopyText(text, successMsg) {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showToast(successMsg, 'success');
+    } catch (e) {
+      prompt('아래 주소를 복사하세요 (Ctrl+C):', text);
+    }
+  }
+
+  function openOriginHelpModal() {
+    if (!modalOriginHelp) return;
+    const origin = getActiveOrigin();
+    if (helpOriginDisplay) {
+      helpOriginDisplay.textContent = origin;
+    }
+    modalOriginHelp.style.display = 'flex';
+  }
+
+  function closeOriginHelpModal() {
+    if (!modalOriginHelp) return;
+    modalOriginHelp.style.display = 'none';
+  }
+
   function openGoogleModal() {
     if (!googleDriveModal) return;
     const { clientId, apiKey } = getGoogleConfig();
     if (inputGoogleClientId) inputGoogleClientId.value = clientId;
     if (inputGoogleApiKey) inputGoogleApiKey.value = apiKey;
+
+    // 현재 접속 원본 업데이트
+    const isFile = window.location.protocol === 'file:';
+    const origin = getActiveOrigin();
+    if (currentOriginDisplay) {
+      currentOriginDisplay.textContent = isFile ? 'file:// (로컬 직접 실행)' : origin;
+    }
+    if (fileProtocolWarning) {
+      fileProtocolWarning.style.display = isFile ? 'block' : 'none';
+    }
+
     googleDriveModal.style.display = 'flex';
   }
 
@@ -792,10 +864,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ESC 키로 모달 닫기 (접근성 보장)
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && googleDriveModal && googleDriveModal.style.display === 'flex') {
-      closeGoogleModal();
+    if (e.key === 'Escape') {
+      if (modalOriginHelp && modalOriginHelp.style.display === 'flex') {
+        closeOriginHelpModal();
+        return;
+      }
+      if (googleDriveModal && googleDriveModal.style.display === 'flex') {
+        closeGoogleModal();
+      }
     }
   });
+
+  if (modalOriginHelp) {
+    modalOriginHelp.addEventListener('click', (e) => {
+      if (e.target === modalOriginHelp) closeOriginHelpModal();
+    });
+  }
+  if (btnCloseOriginHelp) btnCloseOriginHelp.addEventListener('click', closeOriginHelpModal);
+  if (btnConfirmOriginHelp) btnConfirmOriginHelp.addEventListener('click', closeOriginHelpModal);
+  if (btnCopyHelpOrigin) {
+    btnCopyHelpOrigin.addEventListener('click', () => {
+      copyTextToClipboard(getActiveOrigin(), `현재 원본 주소(${getActiveOrigin()})가 복사되었습니다.`);
+    });
+  }
+  if (btnShowOriginHelp) {
+    btnShowOriginHelp.addEventListener('click', openOriginHelpModal);
+  }
+  if (btnCopyOrigin) {
+    btnCopyOrigin.addEventListener('click', () => {
+      copyTextToClipboard(getActiveOrigin(), `Google 콘솔 등록용 주소(${getActiveOrigin()})가 복사되었습니다.`);
+    });
+  }
 
   if (btnCloseGoogleModal) {
     btnCloseGoogleModal.addEventListener('click', closeGoogleModal);
@@ -901,6 +1000,13 @@ document.addEventListener('DOMContentLoaded', () => {
       scope: GOOGLE_SCOPE,
       callback: (tokenResponse) => {
         if (tokenResponse.error !== undefined) {
+          const errDesc = String(tokenResponse.error_description || tokenResponse.error || '');
+          console.warn('Google 인증 콜백 에러:', tokenResponse);
+          if (errDesc.toLowerCase().includes('origin_mismatch') || errDesc.includes('400')) {
+            openOriginHelpModal();
+            showToast('400 origin_mismatch 오류: 승인된 자바스크립트 원본 등록 안내를 확인하세요.', 'error');
+            return;
+          }
           showToast(`Google 인증 오류: ${tokenResponse.error_description || tokenResponse.error}`, 'error');
           return;
         }
@@ -909,6 +1015,12 @@ document.addEventListener('DOMContentLoaded', () => {
       },
       error_callback: (err) => {
         console.warn('Google Identity 토큰 요청 에러:', err);
+        const errStr = String(err?.type || err?.error || err?.message || '').toLowerCase();
+        if (errStr.includes('origin_mismatch') || errStr.includes('access_denied') || errStr.includes('400')) {
+          openOriginHelpModal();
+          showToast('400 origin_mismatch 오류: Google 콘솔 승인된 원본 설정을 확인하세요.', 'error');
+          return;
+        }
         const msg = err?.message || err?.type || '로그인 창이 닫혔거나 팝업이 차단되었습니다.';
         showToast(`Google 계정 접근 오류: ${msg}`, 'error');
       }

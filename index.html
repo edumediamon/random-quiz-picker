@@ -195,12 +195,30 @@
       <div class="modal-body">
         <div class="guide-box">
           <strong>Google Drive 연동 안내:</strong>
-          내 드라이브의 문제 파일(.json, .csv)을 직접 선택하여 불러오려면 Google Cloud API 키와 OAuth Client ID가 필요합니다.
+          내 드라이브의 문제 파일(.xlsx, .csv, .json)을 직접 선택하여 불러오려면 Google Cloud API 키와 OAuth Client ID가 필요합니다.
           <ol>
             <li><strong>Google Cloud 콘솔</strong>에서 프로젝트 생성 후 <strong>Google Picker API</strong> 및 <strong>Google Drive API</strong>를 활성화합니다.</li>
-            <li><strong>OAuth 동의 화면</strong> 구성 및 웹 애플리케이션용 <strong>OAuth 2.0 클라이언트 ID</strong>를 생성합니다. (승인된 JavaScript 원본: <code>http://localhost:3000</code>)</li>
+            <li><strong>OAuth 동의 화면</strong> 구성 및 웹 애플리케이션용 <strong>OAuth 2.0 클라이언트 ID</strong>를 생성합니다.</li>
             <li>사용자 인증 정보에서 <strong>API 키</strong>를 발급받아 아래에 입력합니다.</li>
           </ol>
+
+          <!-- 400 origin_mismatch 방지 및 현재 접속 원본 안내 -->
+          <div id="origin-notice-box" style="margin-top: 10px; padding: 10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; font-size: 0.85rem;">
+            <div style="font-weight: 600; color: #2563eb; margin-bottom: 4px;">
+              🌐 Google 콘솔 [승인된 자바스크립트 원본] 등록 필수 주소:
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px;">
+              <code id="current-origin-display" style="background: #ffffff; padding: 4px 8px; border-radius: 4px; border: 1px solid #cbd5e1; font-weight: bold; color: #0f172a;">http://localhost:3000</code>
+              <button type="button" id="btn-copy-origin" class="btn btn-outline" style="padding: 3px 8px; font-size: 0.8rem; height: auto;">📋 원본 주소 복사</button>
+              <button type="button" id="btn-show-origin-help" class="btn btn-outline" style="padding: 3px 8px; font-size: 0.8rem; height: auto; color: #dc2626; border-color: #fca5a5;">❓ 400 오류 해결 가이드</button>
+            </div>
+            <div id="file-protocol-warning" style="display: none; color: #dc2626; font-weight: bold; margin-bottom: 4px;">
+              ⚠️ 현재 로컬 파일(file://)로 열려 있습니다. Google OAuth 연동을 위해 <code>start-server.bat</code>를 실행하여 <code>http://localhost:3000</code>으로 접속해주세요.
+            </div>
+            <div style="font-size: 0.8rem; color: #64748b; line-height: 1.4;">
+              ※ <strong>400 origin_mismatch 방지 팁:</strong> Google Cloud 콘솔의 OAuth 클라이언트 설정에서 <code>http://localhost:3000</code> 과 <code>http://127.0.0.1:3000</code> 두 개를 모두 승인된 원본에 추가해 두시면 주소창 접속 방식에 상관없이 오류가 발생하지 않습니다. (URL 끝에 <code>/</code> 슬래시를 넣지 마세요)
+            </div>
+          </div>
         </div>
 
         <div class="form-group">
@@ -225,6 +243,51 @@
           <button id="btn-clear-google-config" class="btn btn-outline" type="button">설정 초기화</button>
           <button id="btn-save-google-config" class="btn btn-primary" type="button">저장하기</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 400 origin_mismatch 오류 해결 가이드 모달 -->
+  <div id="modal-origin-help" class="modal-backdrop" style="display: none;">
+    <div class="modal" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3 class="modal-title" style="color: #dc2626; display: flex; align-items: center; gap: 8px;">
+          <span>⚠️</span> <span>400 오류: origin_mismatch 해결 방법</span>
+        </h3>
+        <button id="btn-close-origin-help" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="font-size: 0.95rem; line-height: 1.6;">
+        <p style="margin-bottom: 12px;">
+          Google 로그인 시 <strong>400 origin_mismatch</strong> 오류가 나타나는 이유는 현재 접속 중인 웹 주소가 Google Cloud Console의 <strong>[승인된 자바스크립트 원본]</strong>에 등록되어 있지 않기 때문입니다.
+        </p>
+
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+          <div style="font-weight: 600; color: #1e293b; margin-bottom: 6px;">현재 접속 중인 주소 (이 값을 콘솔에 추가해야 합니다):</div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <code id="help-origin-display" style="background: #ffffff; padding: 6px 10px; border-radius: 4px; border: 1px solid #94a3b8; font-weight: bold; font-size: 1rem; color: #2563eb;">http://localhost:3000</code>
+            <button type="button" id="btn-copy-help-origin" class="btn btn-primary" style="padding: 5px 10px; font-size: 0.85rem; height: auto;">📋 주소 복사</button>
+          </div>
+        </div>
+
+        <h4 style="font-size: 1rem; font-weight: bold; margin-bottom: 8px; color: #0f172a;">🛠️ 해결 3단계:</h4>
+        <ol style="padding-left: 20px; margin-bottom: 16px;">
+          <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline; font-weight: 600;">Google Cloud 콘솔 사용자 인증 정보 페이지 ↗</a>로 이동합니다.</li>
+          <li>사용 중인 <strong>OAuth 2.0 클라이언트 ID</strong> 항목을 클릭하여 수정 화면으로 들어갑니다.</li>
+          <li><strong>[승인된 자바스크립트 원본]</strong> 항목에서 <strong>[+ URI 추가]</strong>를 누르고 아래 2개를 모두 입력한 뒤 <strong>[저장]</strong>을 누릅니다:
+            <ul style="margin-top: 6px; list-style-type: disc; padding-left: 20px; font-family: monospace;">
+              <li><code>http://localhost:3000</code></li>
+              <li><code>http://127.0.0.1:3000</code></li>
+            </ul>
+            <span style="font-size: 0.85rem; color: #dc2626;">※ 주의: 주소 끝에 <code>/</code> 슬래시를 넣지 마세요.</span>
+          </li>
+        </ol>
+
+        <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 0;">
+          💡 저장 후 구글 서버에 전파되기까지 약 1~2분 정도 소요될 수 있습니다. 저장 후 브라우저에서 다시 시도해주세요.
+        </p>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end;">
+        <button id="btn-confirm-origin-help" class="btn btn-primary" type="button">확인했습니다</button>
       </div>
     </div>
   </div>

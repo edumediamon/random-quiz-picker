@@ -434,7 +434,8 @@ const server = http.createServer(async (req, res) => {
 if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`[랜덤 문제 추출기] 로컬 서버가 포트 ${PORT}에서 실행 중입니다.`);
-    console.log(`- 웹 접속 URL: http://localhost:${PORT}`);
+    console.log(`- 웹 접속 URL: http://localhost:${PORT} (또는 http://127.0.0.1:${PORT})`);
+    console.log(`- Google 콘솔 승인된 원본: http://localhost:${PORT} 및 http://127.0.0.1:${PORT}`);
     console.log(`- 조건별 이력 폴더: ${HISTORY_DIR}`);
   });
 }
