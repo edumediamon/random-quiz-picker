@@ -26,6 +26,35 @@ const { QuizEngine } = require('../js/quiz-engine.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+console.log('--- LaTeX 지문·모범답안 원문 보존 검증 ---');
+const mathQuestion = String.raw`전력 $P=VI\cos\phi$, \(x<y\).
+\[\frac{a}{b}\] <img src=x onerror=alert(1)>`;
+const mathAnswer = String.raw`$$\begin{aligned}P&=220\times10\\&=2200\end{aligned}$$
+잘못된 수식: $\frac{$, 일반 수식: =SUM(A1,B1)`;
+const mathRows = [
+  ['id', 'area_label', 'type', 'number_label', 'title', 'type_label_question', 'model_answer'],
+  ['math-1', '수학', '계산형', '1', '수식 검증', mathQuestion, mathAnswer]
+];
+const mathCSV = mathRows.map(row => row.map(value => '"' + value.replace(/"/g, '""') + '"').join(',')).join('\r\n');
+const mathXLSX = require('../js/xlsx.full.min.js');
+const mathWorkbook = mathXLSX.utils.book_new();
+mathXLSX.utils.book_append_sheet(mathWorkbook, mathXLSX.utils.aoa_to_sheet(mathRows), '수식');
+for (const parsed of [
+  parseCSVQuestions(mathCSV),
+  parseJSONQuestions(JSON.stringify([{ type_label_question: mathQuestion, model_answer: mathAnswer }])),
+  parseExcelQuestions(mathXLSX.write(mathWorkbook, { type: 'buffer', bookType: 'xlsx' }))
+]) {
+  assert.strictEqual(parsed[0].question, mathQuestion);
+  assert.strictEqual(parsed[0].answer, mathAnswer);
+  const exported = formatQuestionsAsText(parsed);
+  assert.ok(exported.includes(mathQuestion) && exported.includes(mathAnswer));
+}
+const katex = require('../vendor/katex/katex.min.js');
+assert.ok(katex.renderToString(String.raw`\frac{a}{b}`).includes('class="katex"'));
+assert.ok(katex.renderToString(String.raw`\frac{`, { throwOnError: false }).includes('katex-error'));
+assert.ok(!katex.renderToString(String.raw`\href{javascript:alert(1)}{x}`, { trust: false, throwOnError: false }).includes('<a '));
+console.log('✓ CSV·JSON·XLSX·TXT의 수식 원문 보존 및 KaTeX 오류·신뢰 경계 통과');
+
 
 console.log('--- 자격증별 과목과 명시적 subject 우선순위 회귀 검증 ---');
 const sourceArea='관련 영역: 1. 공공조달 입찰 참가 준비';

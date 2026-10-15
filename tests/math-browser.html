@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>LaTeX browser regression</title>
+<style>iframe { width: 100%; height: 850px; border: 0; } pre { white-space: pre-wrap; }</style>
+<pre id="result">RUNNING</pre>
+<iframe id="app" src="../index.html" title="수식 검증 앱"></iframe>
+<script>
+// Serve the project locally and open /tests/math-browser.html in a browser.
+const result = document.getElementById('result');
+const frame = document.getElementById('app');
+const checks = [];
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+  checks.push(message);
+}
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out: ' + predicate.toString());
+}
+frame.addEventListener('load', async () => {
+  try {
+    const w = frame.contentWindow;
+    const d = w.document;
+    await waitFor(() => d.getElementById('total-count').textContent === '14');
+    d.getElementById('check-exclude-seen').checked = false;
+    const question = String.raw`전력 $P=VI\cos\phi$, \(x<y\).
+$$\frac{a}{b}$$
+\[\sqrt{x}\]
+<img src=x onerror=alert(1)>`;
+    const answer = String.raw`$$\begin{aligned}P&=220\times10\\&=2200\end{aligned}$$
+잘못된 수식: $\frac{$
+일반 수식: =SUM(A1,B1)`;
+    const headers = ['id', 'area_label', 'type', 'number_label', 'title', 'type_label_question', 'model_answer'];
+    const rows = [headers, ...[1, 2, 3].map(i => [String(i), '수학', '계산형', String(i), 'LaTeX 수식', question, answer])];
+    const wb = w.XLSX.utils.book_new();
+    w.XLSX.utils.book_append_sheet(wb, w.XLSX.utils.aoa_to_sheet(rows), '수식');
+    const files = [
+      ['math.csv', rows.map(row => row.map(x => '"' + x.replace(/"/g, '""') + '"').join(',')).join('\r\n')],
+      ['math.json', JSON.stringify(rows.slice(1).map(row => Object.fromEntries(headers.map((h, i) => [h, row[i]]))))],
+      ['math.xlsx', w.XLSX.write(wb, { type: 'array', bookType: 'xlsx' })]
+    ];
+    for (const [name, payload] of files) {
+      const transfer = new w.DataTransfer();
+      transfer.items.add(new w.File([payload], name));
+      const input = d.getElementById('file-input');
+      input.files = transfer.files;
+      input.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await waitFor(() => d.getElementById('data-badge').textContent.includes(name));
+      for (const mode of ['single', 'multi']) {
+        d.getElementById('mode-' + mode + '-btn').click();
+        d.getElementById('count-select').value = '3';
+        d.getElementById('btn-pick-random').click();
+        const count = mode === 'single' ? 1 : 3;
+        await waitFor(() => d.querySelectorAll('.question-card').length === count);
+        check(d.querySelectorAll('.question-body .katex').length === count * 4, name + ' ' + mode + ': all four delimiters');
+        check(d.querySelectorAll('.answer-text .katex').length === count, name + ' ' + mode + ': answer math');
+        check([...d.querySelectorAll('.answer-text')].every(el => el.textContent.includes(String.raw`$\frac{$`)), name + ' ' + mode + ': invalid math preserved');
+        check(!d.querySelector('.question-body img'), name + ' ' + mode + ': imported HTML escaped');
+        check(d.querySelector('.answer-text').textContent.includes('=SUM(A1,B1)'), name + ' ' + mode + ': plain formula preserved');
+        if (mode === 'single') d.querySelector('.answer-toggle-btn').click();
+        else d.getElementById('btn-toggle-all-answers').click();
+        check(d.querySelectorAll('.answer-content.show').length === count, name + ' ' + mode + ': answer toggle');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    d.getAnimations().forEach(animation => animation.finish());
+    check([...d.querySelectorAll('.answer-content.show')].every(el => w.getComputedStyle(el).opacity === '1'), 'expanded answers fully visible');
+    await d.fonts.ready;
+    check(d.fonts.check('16px KaTeX_Main'), 'local KaTeX font loaded');
+    result.textContent = 'PASS (' + checks.length + ' checks)\n' + checks.join('\n');
+    document.title = 'PASS: LaTeX browser regression';
+  } catch (error) {
+    result.textContent = 'FAIL: ' + error.stack + '\n' + checks.join('\n');
+    document.title = 'FAIL: LaTeX browser regression';
+  }
+});
+</script>
+</html>

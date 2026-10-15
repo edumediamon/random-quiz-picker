@@ -1398,6 +1398,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     resultsContainer.innerHTML = '';
     resultsContainer.appendChild(card);
+    renderLatex(card);
 
     // TXT 저장 이벤트
     card.querySelector('#btn-single-save-current-txt').addEventListener('click', () => {
@@ -1511,6 +1512,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     resultsContainer.innerHTML = '';
     resultsContainer.appendChild(wrapper);
+    renderLatex(wrapper);
 
     // 일괄 정답 토글 이벤트
     let allExpanded = false;
@@ -1568,6 +1570,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // ==========================================================================
   // 유틸리티 함수
   // ==========================================================================
+  function renderLatex(root) {
+    if (typeof window.renderMathInElement !== 'function') return;
+    root.querySelectorAll('.question-body, .answer-text').forEach(element => {
+      window.renderMathInElement(element, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$', right: '$', display: false },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '\\[', right: '\\]', display: true }
+        ],
+        throwOnError: false,
+        trust: false
+      });
+    });
+  }
+
   function escapeHtml(str) {
     if (!str) return '';
     return String(str)

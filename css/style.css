@@ -696,10 +696,23 @@ body {
 }
 
 .answer-text {
+  white-space: pre-line;
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--text-main);
   margin-bottom: 10px;
+}
+
+.question-body .katex,
+.answer-text .katex {
+  white-space: normal;
+}
+
+.question-body .katex-display,
+.answer-text .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .explanation-text {
