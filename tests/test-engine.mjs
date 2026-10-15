@@ -213,6 +213,96 @@ const idSet = new Set(pickMulti.items.map(item => item.id));
 assert.strictEqual(idSet.size, 5, '추출된 5개 문항에 중복이 없어야 함');
 console.log('✓ 1문제 및 N문제 랜덤 무작위 추출 통과');
 
+console.log('--- 문제 소진 시 이력 유지·명시적 초기화 회귀 검증 ---');
+const exhaustionQuestions = [
+  { id: 'a1', subject: 'A', question: 'alpha' },
+  { id: 'a2', subject: 'A', question: 'beta' },
+  { id: 'b1', subject: 'B', question: 'gamma' }
+];
+const exhaustionEngine = new QuizEngine(exhaustionQuestions);
+assert.strictEqual(exhaustionEngine.pickRandom({ subject: 'A' }, 10, { excludeSeen: true }).items.length, 2);
+const seenBeforeExhaustion = [...exhaustionEngine.seenQuestionIds];
+for (let attempt = 0; attempt < 3; attempt++) {
+  const exhausted = exhaustionEngine.pickRandom({ subject: 'A' }, 1, { excludeSeen: true });
+  assert.strictEqual(exhausted.exhausted, true);
+  assert.strictEqual(exhausted.items.length, 0);
+  assert.strictEqual(exhausted.seenReset, false);
+  assert.deepStrictEqual([...exhaustionEngine.seenQuestionIds], seenBeforeExhaustion);
+}
+assert.strictEqual(exhaustionEngine.pickRandom({ subject: 'B' }, 1, { excludeSeen: true }).items[0].id, 'b1');
+assert.strictEqual(exhaustionEngine.pickRandom({ subject: 'A' }, 1, { excludeSeen: false }).items.length, 1);
+exhaustionEngine.resetSeen();
+assert.strictEqual(exhaustionEngine.pickRandom({ subject: 'A', keyword: 'alpha' }, 1, { excludeSeen: true }).items.length, 1);
+assert.strictEqual(exhaustionEngine.pickRandom({ subject: 'A', keyword: 'alpha' }, 1, { excludeSeen: true }).exhausted, true);
+assert.strictEqual(exhaustionEngine.pickRandom({ subject: 'A' }, 10, { excludeSeen: true }).items.length, 1, '남은 문제만 추출');
+assert.ok(!exhaustionEngine.pickRandom({ subject: 'missing' }, 1, { excludeSeen: true }).exhausted, '조건 불일치와 소진 구분');
+
+const pickHandlerSource = filterSource.match(/  btnPickRandom\.addEventListener\('click', async \(\) => \{[\s\S]*?\n  \}\);/)[0];
+const resetHandlerSource = filterSource.match(/  btnResetSeen\.addEventListener\('click', async \(\) => \{[\s\S]*?\n  \}\);/)[0];
+const clearSource = filterSource.match(/  async function clearHistoryForKey\(key\) \{[\s\S]*?\n  \}/)[0];
+const resetCurrentSource = filterSource.match(/  async function resetCurrentHistory\(key\) \{[\s\S]*?\n  \}/)[0];
+function exhaustionFixture() {
+  const store = new Map();
+  const state = { confirm: false, deleteFails: false, storageFails: false, renders: 0, prompts: 0, saves: 0, deletes: 0, filters: { subject: 'A', keyword: '' } };
+  const key = () => ({ source: 'fixture', subject: state.filters.subject });
+  const context = {
+    engine: new QuizEngine(exhaustionQuestions), currentSourceId: 'fixture', serverAvailable: false,
+    activeHistoryKeyStr: JSON.stringify(key()), questionHistory: [], latestPickedResult: null,
+    btnPickRandom: selectFixture(), btnResetSeen: selectFixture(), currentMode: 'multi', countSelect: { value: '3' }, checkExcludeSeen: { checked: true },
+    getActiveFilters: () => state.filters, getHistoryKey: key, localStorageKeyFor: JSON.stringify,
+    historyKeyToQuery: () => 'source=fixture', switchHistoryContext: async () => {},
+    localStorage: { removeItem: k => { if (state.storageFails) throw new Error('storage unavailable'); store.delete(k); } },
+    fetch: async () => { state.deletes++; return { ok: !state.deleteFails, json: async () => ({ success: !state.deleteFails }) }; },
+    window: { confirm: () => { state.prompts++; return state.confirm; } }, console: { warn: () => {} },
+    showToast: () => {}, updateSeenStatus: () => {}, updateHistoryStatus: () => {}, updateHistoryBadge: () => {},
+    renderSingleQuestion: () => state.renders++, renderMultiQuestions: () => state.renders++,
+    persistPickedQuestions: async (k, questions, reset) => { assert.strictEqual(reset, false); state.saves++; store.set(JSON.stringify(k), questions.map(q => q.id)); }
+  };
+  runInNewContext('let isPicking = false;\n' + clearSource + '\n' + resetCurrentSource + '\n' + pickHandlerSource + '\n' + resetHandlerSource, context);
+  return { context, state, store, pick: () => context.btnPickRandom.listeners.click(), reset: () => context.btnResetSeen.listeners.click() };
+}
+const cancelled = exhaustionFixture();
+await cancelled.pick();
+const firstResult = cancelled.context.latestPickedResult;
+await cancelled.pick();
+await cancelled.pick();
+assert.strictEqual(cancelled.state.prompts, 2);
+assert.strictEqual(cancelled.state.renders, 1);
+assert.strictEqual(cancelled.context.latestPickedResult, firstResult);
+assert.strictEqual(cancelled.context.questionHistory.length, 2);
+assert.strictEqual(cancelled.state.saves, 1);
+assert.strictEqual(cancelled.context.engine.seenCount, 2);
+cancelled.state.filters = { subject: 'B', keyword: '' };
+await cancelled.pick();
+assert.strictEqual(cancelled.context.latestPickedResult.items[0].id, 'b1');
+for (const failure of ['server', 'storage']) {
+  const fixture = exhaustionFixture();
+  await fixture.pick();
+  fixture.state.confirm = true;
+  fixture.context.serverAvailable = failure === 'server';
+  fixture.state.deleteFails = failure === 'server';
+  fixture.state.storageFails = failure === 'storage';
+  await fixture.pick();
+  await fixture.reset();
+  assert.strictEqual(fixture.context.engine.seenCount, 2, failure + ' 초기화 실패 시 중복 제외 유지');
+  assert.strictEqual(fixture.context.questionHistory.length, 2);
+  assert.strictEqual(fixture.state.renders, 1);
+  assert.strictEqual(fixture.state.saves, 1);
+  assert.ok(fixture.store.has(JSON.stringify({ source: 'fixture', subject: 'A' })));
+}
+const approved = exhaustionFixture();
+await approved.pick();
+approved.state.confirm = true;
+await approved.pick();
+assert.strictEqual(approved.state.renders, 2);
+assert.strictEqual(approved.context.questionHistory.length, 2);
+assert.strictEqual(approved.state.saves, 2);
+await approved.reset();
+assert.strictEqual(approved.context.engine.seenCount, 0);
+assert.strictEqual(approved.context.questionHistory.length, 0);
+assert.strictEqual(approved.state.renders, 2, '수동 초기화는 화면을 바꾸지 않음');
+console.log('✓ 소진·취소·승인·서버/브라우저 저장소 실패·다른 조건 출제 통과');
+
 console.log('--- 5. 출제 문제 TXT 파일 포맷터 단위 테스트 ---');
 const txtOutput = formatQuestionsAsText(pickMulti.items, '단위테스트 출제 기록');
 assert.ok(txtOutput.includes('[랜덤 문제 추출기] 단위테스트 출제 기록'), '헤더 타이틀 확인');

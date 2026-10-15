@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><title>RUNNING: exhaustion regression</title>
+<pre id="result">RUNNING</pre>
+<iframe id="app" src="../index.html" title="소진 검증 앱" style="width:100%;height:900px"></iframe>
+<script>
+const output = document.getElementById('result');
+const checks = [];
+const check = (condition, message) => { if (!condition) throw new Error(message); checks.push(message); };
+async function waitFor(test) {
+  for (let i = 0; i < 200; i++) {
+    if (test()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out: ' + test);
+}
+document.getElementById('app').addEventListener('load', async () => {
+  try {
+    const w = document.getElementById('app').contentWindow, d = w.document;
+    await waitFor(() => d.getElementById('total-count').textContent === '14');
+    let approve = false, prompts = 0;
+    w.confirm = () => { prompts++; return approve; };
+    // Use a separate source per run so existing study histories remain untouched.
+    const name = 'exhaustion-test-' + Date.now() + '.json';
+    const rows = [
+      { id: 'a1', subject: 'A', question: 'A first', answer: '1' },
+      { id: 'a2', subject: 'A', question: 'A second', answer: '2' },
+      { id: 'b1', subject: 'B', question: 'B only', answer: '3' }
+    ];
+    const transfer = new w.DataTransfer();
+    transfer.items.add(new w.File([JSON.stringify(rows)], name));
+    const input = d.getElementById('file-input');
+    input.files = transfer.files;
+    input.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await waitFor(() => d.getElementById('data-badge').textContent.includes(name));
+    const filter = d.getElementById('filter-subject');
+    const select = subject => { filter.value = subject; filter.dispatchEvent(new w.Event('change')); };
+    const pick = async () => { d.getElementById('btn-pick-random').click(); await new Promise(r => setTimeout(r, 150)); };
+    const html = () => d.getElementById('results-container').innerHTML;
+    const stored = () => Object.fromEntries(Object.keys(w.localStorage).filter(k => k.includes(name)).map(k => [k, w.localStorage.getItem(k)]));
+    d.getElementById('check-exclude-seen').checked = true;
+    select('A');
+    await pick();
+    const first = d.querySelector('.question-body').textContent;
+    await pick();
+    check(d.querySelector('.question-body').textContent !== first, 'unseen second question');
+    const exhaustedHtml = html(), exhaustedStorage = JSON.stringify(stored());
+    await pick();
+    check(prompts === 1, 'exhaustion confirmation shown');
+    check(html() === exhaustedHtml, 'cancel preserves current question');
+    check(JSON.stringify(stored()) === exhaustedStorage, 'cancel preserves persisted history');
+    await pick();
+    check(prompts === 2 && html() === exhaustedHtml, 'repeated cancellation never repeats a question');
+    select('B');
+    await pick();
+    check(d.querySelector('.question-body').textContent === 'B only', 'other condition remains usable');
+    const bEntry = Object.entries(stored()).find(([key]) => key.includes('"subject":"B"'));
+    select('A');
+    approve = true;
+    await pick();
+    check(prompts === 3, 'return to exhausted condition still requires confirmation');
+    check(d.querySelector('.question-body').textContent.startsWith('A '), 'approved reset permits a new draw');
+    check(w.localStorage.getItem(bEntry[0]) === bEntry[1], 'other condition history survives reset');
+    await pick();
+    const failureHtml = html(), failureStorage = JSON.stringify(stored());
+    const removeItem = w.Storage.prototype.removeItem;
+    try {
+      w.Storage.prototype.removeItem = function () { throw new Error('test storage failure'); };
+      await pick();
+      check(html() === failureHtml, 'storage failure preserves current question');
+      check(JSON.stringify(stored()) === failureStorage, 'storage failure preserves history');
+      check(d.getElementById('toast-container').textContent.includes('이력 초기화에 실패'), 'storage failure reported');
+    } finally { w.Storage.prototype.removeItem = removeItem; }
+    approve = false;
+    d.getElementById('btn-reset-seen').click();
+    await new Promise(r => setTimeout(r, 100));
+    check(html() === failureHtml && JSON.stringify(stored()) === failureStorage, 'manual reset cancellation preserves state');
+    output.textContent = 'PASS (' + checks.length + ' checks)\n' + checks.join('\n');
+    document.title = 'PASS: exhaustion regression';
+  } catch (error) {
+    output.textContent = 'FAIL: ' + error.stack + '\n' + checks.join('\n');
+    document.title = 'FAIL: exhaustion regression';
+  }
+}, { once: true });
+</script></html>

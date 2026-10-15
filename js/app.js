@@ -321,19 +321,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function clearHistoryForKey(key) {
-    try { localStorage.removeItem(localStorageKeyFor(key)); } catch (e) { /* 무시 */ }
-    if (!serverAvailable) {
-      updateHistoryBadge(null, 0);
-      return;
-    }
     try {
-      const res = await fetch(`/api/history?${historyKeyToQuery(key)}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
-      updateHistoryBadge(data.fileName, 0);
+      let fileName = null;
+      if (serverAvailable) {
+        const res = await fetch(`/api/history?${historyKeyToQuery(key)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || `HTTP ${res.status}`);
+        fileName = data.fileName;
+      }
+      localStorage.removeItem(localStorageKeyFor(key));
+      if (JSON.stringify(key) === activeHistoryKeyStr) updateHistoryBadge(fileName, 0);
+      return true;
     } catch (err) {
       console.warn('조건별 이력 초기화 실패:', err);
-      showToast('이력 파일 초기화에 실패했습니다.', 'error');
+      showToast('이력 초기화에 실패했습니다. 현재 문제와 중복 제외 목록을 유지합니다. 다른 조건을 선택하거나 다시 시도해 주세요.', 'error');
+      return false;
     }
   }
 
@@ -1250,15 +1252,27 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   btnResetSeen.addEventListener('click', async () => {
-    if (!currentSourceId) return;
-    const key = getHistoryKey();
+    if (!currentSourceId || isPicking) return;
+    isPicking = true;
+    try {
+      await switchHistoryContext();
+      if (!window.confirm('현재 조건의 출제 이력을 초기화할까요?\n초기화하면 이미 나온 문제가 다시 출제될 수 있습니다.')) return;
+      await resetCurrentHistory(getHistoryKey());
+    } finally {
+      isPicking = false;
+    }
+  });
+
+  async function resetCurrentHistory(key) {
+    if (!await clearHistoryForKey(key)) return false;
+    if (JSON.stringify(key) !== JSON.stringify(getHistoryKey())) return false;
     engine.resetSeen();
     questionHistory.length = 0;
     updateSeenStatus();
     updateHistoryStatus();
-    await clearHistoryForKey(key);
     showToast('현재 조건의 출제 이력이 초기화되었습니다. (다른 조건의 기록은 유지됩니다)', 'info');
-  });
+    return true;
+  }
 
   // ==========================================================================
   // 무작위 문제 추출 실행
@@ -1282,16 +1296,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const count = currentMode === 'single' ? 1 : parseInt(countSelect.value, 10);
       const excludeSeen = checkExcludeSeen.checked;
 
-      const result = engine.pickRandom(filters, count, { excludeSeen });
+      let result = engine.pickRandom(filters, count, { excludeSeen });
+      if (result.exhausted) {
+        const reset = window.confirm('현재 조건의 미출제 문제를 모두 소진했습니다.\n현재 조건의 출제 이력을 초기화하고 다시 출제할까요?\n검색어와 관계없이 현재 조건의 이력이 초기화됩니다.\n취소하면 현재 문제와 이력을 유지합니다. 다른 조건을 선택하면 계속 출제할 수 있습니다.');
+        if (!reset || !await resetCurrentHistory(historyKey)) return;
+        result = engine.pickRandom(filters, count, { excludeSeen });
+      }
       updateSeenStatus();
 
       if (result.items.length === 0) {
         showToast(result.message || '조건에 일치하는 문제가 없습니다.', 'error');
         return;
-      }
-
-      if (result.seenReset) {
-        showToast('이 조건의 문제를 모두 풀어 이력을 새로 시작합니다.', 'info');
       }
 
       // 세션 누적 목록(수동 TXT 다운로드용)
@@ -1306,10 +1321,8 @@ document.addEventListener('DOMContentLoaded', () => {
         renderMultiQuestions(result.items, result);
       }
 
-      // 조건별 이력 파일 저장. 완료 전에는 다음 추출을 막아 기록 순서를 보장한다.
-      // (검색어로 좁힌 풀에서의 순환은 파일 전체를 비우지 않음)
-      const resetBeforeAppend = result.seenReset && !filters.keyword.trim();
-      await persistPickedQuestions(historyKey, result.items, resetBeforeAppend);
+      // 완료 전에는 다음 추출을 막아 기록 순서를 보장한다.
+      await persistPickedQuestions(historyKey, result.items, false);
     } finally {
       isPicking = false;
     }

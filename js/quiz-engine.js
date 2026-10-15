@@ -126,16 +126,19 @@ class QuizEngine {
       };
     }
 
-    let seenReset = false;
     if (excludeSeen) {
       const unseenPool = candidatePool.filter(q => !this.seenQuestionIds.has(QuizEngine.questionKey(q)));
       if (unseenPool.length === 0) {
-        // 이미 해당 조건의 모든 문제를 확인한 경우 세션 이력 초기화 후 재추출
-        candidatePool.forEach(q => this.seenQuestionIds.delete(QuizEngine.questionKey(q)));
-        seenReset = true;
-      } else {
-        candidatePool = unseenPool;
+        return {
+          items: [],
+          totalAvailable: 0,
+          poolTotal,
+          seenReset: false,
+          exhausted: true,
+          message: '현재 조건의 미출제 문제를 모두 소진했습니다.'
+        };
       }
+      candidatePool = unseenPool;
     }
 
     // Fisher-Yates 셔플 수행
@@ -152,7 +155,7 @@ class QuizEngine {
       poolTotal,
       requestedCount: count,
       actualCount,
-      seenReset
+      seenReset: false
     };
   }
 
