@@ -21,15 +21,21 @@ class QuizEngine {
   /**
    * 데이터셋에 존재하는 고유한 필터 목록 추출 (자격증, 과목/영역, 유형, 난이도)
    */
-  getFilterOptions() {
+  getFilterOptions(exam = 'ALL', subject = 'ALL') {
     const exams = new Set();
     const subjects = new Set();
+    const areas = new Set();
+    const years = new Set();
     const types = new Set();
     const difficulties = new Set();
 
     this.questions.forEach(q => {
       if (q.exam) exams.add(q.exam);
-      if (q.subject) subjects.add(q.subject);
+      if (q.subject && (exam === 'ALL' || q.exam === exam)) subjects.add(q.subject);
+      if ((exam === 'ALL' || q.exam === exam) && (subject === 'ALL' || q.subject === subject)) {
+        if (q.area_label) areas.add(q.area_label);
+        years.add(q.year || 'UNSPECIFIED');
+      }
       if (q.type) types.add(q.type);
       if (q.difficulty) difficulties.add(q.difficulty);
     });
@@ -37,6 +43,8 @@ class QuizEngine {
     return {
       exams: Array.from(exams).sort(),
       subjects: Array.from(subjects).sort(),
+      areas: Array.from(areas).sort(),
+      years: Array.from(years).sort().reverse(),
       types: Array.from(types).sort(),
       difficulties: Array.from(difficulties).sort()
     };
@@ -50,6 +58,8 @@ class QuizEngine {
     const {
       exam = 'ALL',
       subject = 'ALL',
+      area_label = 'ALL',
+      year = 'ALL',
       type = 'ALL',
       difficulty = 'ALL',
       keyword = ''
@@ -60,6 +70,8 @@ class QuizEngine {
     return this.questions.filter(q => {
       if (exam !== 'ALL' && q.exam !== exam) return false;
       if (subject !== 'ALL' && q.subject !== subject) return false;
+      if (area_label !== 'ALL' && q.area_label !== area_label) return false;
+      if (year !== 'ALL' && (q.year || 'UNSPECIFIED') !== year) return false;
       if (type !== 'ALL' && q.type !== type) return false;
       if (difficulty !== 'ALL' && q.difficulty !== difficulty) return false;
 
@@ -69,7 +81,7 @@ class QuizEngine {
         const subjectMatch = (q.subject || '').toLowerCase().includes(lowerKeyword);
         const typeMatch = (q.type || '').toLowerCase().includes(lowerKeyword);
         const examMatch = (q.exam || '').toLowerCase().includes(lowerKeyword);
-        if (!titleMatch && !questionMatch && !subjectMatch && !typeMatch && !examMatch) {
+        if (!titleMatch && !questionMatch && !subjectMatch && !typeMatch && !examMatch && !(q.area_label || '').toLowerCase().includes(lowerKeyword)) {
           return false;
         }
       }
@@ -78,9 +90,11 @@ class QuizEngine {
     });
   }
 
-  /**
-   * Fisher-Yates (Knuth) 공정 셔플 알고리즘
-   */
+  // 원본 id를 보존하면서 연도·과목이 다른 문제의 이력을 구분한다.
+  static questionKey(q) {
+    return q.year ? 'year:' + encodeURIComponent(JSON.stringify([q.year, q.exam || '', q.subject || '', q.id])) : q.id;
+  }
+
   static shuffle(array) {
     const arr = [...array];
     for (let i = arr.length - 1; i > 0; i--) {
@@ -114,10 +128,10 @@ class QuizEngine {
 
     let seenReset = false;
     if (excludeSeen) {
-      const unseenPool = candidatePool.filter(q => !this.seenQuestionIds.has(q.id));
+      const unseenPool = candidatePool.filter(q => !this.seenQuestionIds.has(QuizEngine.questionKey(q)));
       if (unseenPool.length === 0) {
         // 이미 해당 조건의 모든 문제를 확인한 경우 세션 이력 초기화 후 재추출
-        candidatePool.forEach(q => this.seenQuestionIds.delete(q.id));
+        candidatePool.forEach(q => this.seenQuestionIds.delete(QuizEngine.questionKey(q)));
         seenReset = true;
       } else {
         candidatePool = unseenPool;
@@ -130,7 +144,7 @@ class QuizEngine {
     const picked = shuffled.slice(0, actualCount);
 
     // 추출된 문제 ID 기록
-    picked.forEach(q => this.seenQuestionIds.add(q.id));
+    picked.forEach(q => this.seenQuestionIds.add(QuizEngine.questionKey(q)));
 
     return {
       items: picked,

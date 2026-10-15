@@ -151,6 +151,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const filterExam = document.getElementById('filter-exam');
   const filterSubject = document.getElementById('filter-subject');
+  const filterArea = document.getElementById('filter-area');
+  const filterYear = document.getElementById('filter-year');
   const filterType = document.getElementById('filter-type');
   const filterDifficulty = document.getElementById('filter-difficulty');
   const filterKeyword = document.getElementById('filter-keyword');
@@ -177,9 +179,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ==========================================================================
   // 조건별 출제 이력 (history/ 폴더 또는 LocalStorage)
-  // 이력 키 = 문제 파일 + 자격증 + 영역 + 유형 + 난이도 (검색어는 제외)
+  // 이력 키 = 문제 파일 + 자격증 + 과목 + 유형 + 난이도 + 선택한 영역·연도 (검색어 제외)
   // ==========================================================================
-  const HISTORY_KEY_FIELDS = ['exam', 'subject', 'type', 'difficulty'];
+  const HISTORY_KEY_FIELDS = ['exam', 'subject', 'type', 'difficulty', 'area_label', 'year'];
   const LOCAL_STORAGE_HISTORY_PREFIX = 'quiz_picker_seen::';
   const LEGACY_STORAGE_KEYS = ['quiz_picker_seen_ids', 'quiz_picker_history_questions'];
 
@@ -197,14 +199,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function getHistoryKey() {
     const filters = getActiveFilters();
     const key = { source: currentSourceId };
-    HISTORY_KEY_FIELDS.forEach(field => { key[field] = filters[field] || 'ALL'; });
+    HISTORY_KEY_FIELDS.forEach(field => {
+      const value = filters[field] || 'ALL';
+      if (['area_label', 'year'].includes(field) && value === 'ALL') return;
+      key[field] = value;
+    });
     return key;
   }
 
   function historyKeyToQuery(key) {
     const params = new URLSearchParams();
     params.set('source', key.source);
-    HISTORY_KEY_FIELDS.forEach(field => params.set(field, key[field]));
+    HISTORY_KEY_FIELDS.forEach(field => params.set(field, key[field] || 'ALL'));
     return params.toString();
   }
 
@@ -291,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function persistPickedQuestions(key, questions, resetBeforeAppend) {
     // 브라우저 저장소에는 항상 같은 키로 보관 (서버 장애 대비)
     const localIds = resetBeforeAppend ? new Set() : new Set(readLocalSeenIds(key));
-    questions.forEach(q => localIds.add(q.id));
+    questions.forEach(q => localIds.add(QuizEngine.questionKey(q)));
     writeLocalSeenIds(key, localIds);
 
     if (!serverAvailable) {
@@ -394,11 +400,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function populateFilters() {
-    const options = engine.getFilterOptions();
+    const allOptions = engine.getFilterOptions();
 
     // 현재 선택값 보존
     const prevExam = filterExam.value;
+    const options = allOptions.exams.includes(prevExam) ? engine.getFilterOptions(prevExam) : allOptions;
     const prevSubject = filterSubject.value;
+    const prevArea = filterArea.value;
+    const prevYear = filterYear.value;
     const prevType = filterType ? filterType.value : 'ALL';
     const prevDiff = filterDifficulty.value;
 
@@ -407,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
       options.exams.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
 
     // 과목 / 관련 영역 선택상자
-    filterSubject.innerHTML = '<option value="ALL">전체 영역 / 과목</option>' +
+    filterSubject.innerHTML = '<option value="ALL">전체 과목</option>' +
       options.subjects.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
 
     // 유형 선택상자
@@ -422,7 +431,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 이전 값 복원
     if (options.exams.includes(prevExam)) filterExam.value = prevExam;
-    if (options.subjects.includes(prevSubject)) filterSubject.value = prevSubject;
+    filterSubject.value = options.subjects.includes(prevSubject) ? prevSubject : 'ALL';
+    const scoped = engine.getFilterOptions(filterExam.value, filterSubject.value);
+    filterArea.innerHTML = '<option value="ALL">전체 관련 영역</option>' +
+      scoped.areas.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+    filterYear.innerHTML = '<option value="ALL">전체 연도</option>' +
+      scoped.years.map(y => `<option value="${escapeHtml(y)}">${y === 'UNSPECIFIED' ? '연도 미지정' : escapeHtml(y) + '년'}</option>`).join('');
+    filterArea.value = scoped.areas.includes(prevArea) ? prevArea : 'ALL';
+    filterYear.value = scoped.years.includes(prevYear) ? prevYear : 'ALL';
     if (filterType && options.types.includes(prevType)) filterType.value = prevType;
     if (options.difficulties.includes(prevDiff)) filterDifficulty.value = prevDiff;
   }
@@ -431,6 +447,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return {
       exam: filterExam.value,
       subject: filterSubject.value,
+      area_label: filterArea.value,
+      year: filterYear.value,
       type: filterType ? filterType.value : 'ALL',
       difficulty: filterDifficulty.value,
       keyword: filterKeyword.value
@@ -479,7 +497,9 @@ document.addEventListener('DOMContentLoaded', () => {
     questions.forEach((q, idx) => {
       const tags = [
         q.exam ? `자격증/시험: ${q.exam}` : '',
-        q.subject ? `관련 영역: ${q.subject}` : '',
+        q.subject ? `과목: ${q.subject}` : '',
+        q.area_label ? `관련 영역: ${q.area_label}` : '',
+        q.year ? `연도: ${q.year}` : '',
         q.type ? `유형: ${q.type}` : '',
         q.difficulty ? `난이도: ${q.difficulty}` : ''
       ].filter(Boolean).join(' | ');
@@ -536,9 +556,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 필터 변경 이벤트: 조건이 바뀌면 해당 조건의 이력 파일로 전환
-  const filterElements = [filterExam, filterSubject, filterType, filterDifficulty].filter(Boolean);
+  const filterElements = [filterExam, filterSubject, filterArea, filterYear, filterType, filterDifficulty].filter(Boolean);
   filterElements.forEach(el => {
     el.addEventListener('change', () => {
+      if (el === filterExam || el === filterSubject) populateFilters();
       updateMatchedCount();
       switchHistoryContext();
     });
@@ -548,9 +569,12 @@ document.addEventListener('DOMContentLoaded', () => {
   btnResetFilters.addEventListener('click', () => {
     filterExam.value = 'ALL';
     filterSubject.value = 'ALL';
+    filterArea.value = 'ALL';
+    filterYear.value = 'ALL';
     if (filterType) filterType.value = 'ALL';
     filterDifficulty.value = 'ALL';
     filterKeyword.value = '';
+    populateFilters();
     updateMatchedCount();
     switchHistoryContext();
     showToast('필터 조건이 초기화되었습니다.', 'info');
@@ -578,7 +602,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fileInput.value = '';
 
     filterExam.innerHTML = '<option value="ALL">전체 자격증 / 시험</option>';
-    filterSubject.innerHTML = '<option value="ALL">전체 영역 / 과목</option>';
+    filterSubject.innerHTML = '<option value="ALL">전체 과목</option>';
+    filterArea.innerHTML = '<option value="ALL">전체 관련 영역</option>';
+    filterYear.innerHTML = '<option value="ALL">전체 연도</option>';
     if (filterType) filterType.innerHTML = '<option value="ALL">전체 유형</option>';
     filterDifficulty.innerHTML = '<option value="ALL">전체 난이도</option>';
     filterKeyword.value = '';
@@ -1317,6 +1343,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const badgesHtml = [
       q.exam ? `<span class="badge badge-exam">${escapeHtml(q.exam)}</span>` : '',
       q.subject ? `<span class="badge badge-subject">${escapeHtml(q.subject)}</span>` : '',
+      q.area_label ? `<span class="badge badge-subject">${escapeHtml(q.area_label)}</span>` : '',
+      q.year ? `<span class="badge badge-exam">${escapeHtml(q.year)}년</span>` : '',
       q.type ? `<span class="badge badge-type">${escapeHtml(q.type)}</span>` : '',
       q.difficulty ? `<span class="badge badge-difficulty difficulty-${escapeHtml(q.difficulty)}">${escapeHtml(q.difficulty)}</span>` : ''
     ].filter(Boolean).join('');
@@ -1445,6 +1473,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const badgesHtml = [
         q.exam ? `<span class="badge badge-exam">${escapeHtml(q.exam)}</span>` : '',
         q.subject ? `<span class="badge badge-subject">${escapeHtml(q.subject)}</span>` : '',
+        q.area_label ? `<span class="badge badge-subject">${escapeHtml(q.area_label)}</span>` : '',
+        q.year ? `<span class="badge badge-exam">${escapeHtml(q.year)}년</span>` : '',
         q.type ? `<span class="badge badge-type">${escapeHtml(q.type)}</span>` : '',
         q.difficulty ? `<span class="badge badge-difficulty difficulty-${escapeHtml(q.difficulty)}">${escapeHtml(q.difficulty)}</span>` : ''
       ].filter(Boolean).join('');
@@ -1513,7 +1543,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 텍스트 클립보드 복사 이벤트
     wrapper.querySelector('#btn-copy-exam').addEventListener('click', () => {
       const formattedText = questions.map((q, idx) => {
-        const tags = [q.exam, q.subject, q.type, q.difficulty].filter(Boolean).join(' / ');
+        const tags = [q.exam, q.subject, q.area_label, q.year, q.type, q.difficulty].filter(Boolean).join(' / ');
         let text = `[문제 ${idx + 1}]`;
         if (tags) text += ` (${tags})`;
         text += `\n제목: ${q.title}\n본문: ${q.question}\n`;

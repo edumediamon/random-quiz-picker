@@ -26,6 +26,58 @@ const { QuizEngine } = require('../js/quiz-engine.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+
+console.log('--- 자격증별 과목과 명시적 subject 우선순위 회귀 검증 ---');
+const sourceArea='관련 영역: 1. 공공조달 입찰 참가 준비';
+const canonicalSubject='명시적 과목';
+for (const headers of [
+  ['id','exam','subject','area_label','question','answer'],
+  ['id','area_label','subject','exam','question','answer']
+]) {
+  const raw={id:'q1',exam:'공공조달관리사',subject:canonicalSubject,area_label:sourceArea,question:'원본 문제',answer:'원본 답안'};
+  const parsed=parseRowsToQuestions([headers,headers.map(h=>raw[h])]);
+  assert.strictEqual(parsed[0].subject,canonicalSubject,'명시적 subject는 열 순서와 무관하게 유지');
+  assert.strictEqual(raw.area_label,sourceArea,'원본 area_label 불변');
+}
+const legacyArea=parseRowsToQuestions([['id','area_label','question'],['q1',sourceArea,'문제']]);
+assert.strictEqual(legacyArea[0].subject,sourceArea,'기존 area_label 전용 파일 호환');
+const subjectEngine=new QuizEngine([
+  {id:'a',exam:'공공조달관리사',subject:sourceArea},
+  {id:'b',exam:'정보처리기사',subject:'데이터베이스'},
+  {id:'c',exam:'공공조달관리사',subject:'관련 영역: 2. 공공조달 입찰계획 수립'}
+]);
+assert.deepStrictEqual(subjectEngine.getFilterOptions('공공조달관리사').subjects,[sourceArea,'관련 영역: 2. 공공조달 입찰계획 수립']);
+assert.deepStrictEqual(subjectEngine.getFilterOptions('정보처리기사').subjects,['데이터베이스']);
+assert.strictEqual(subjectEngine.getFilterOptions().subjects.length,3,'전체 자격증에서는 전체 과목');
+assert.deepStrictEqual(subjectEngine.getFilterOptions('공공조달관리사').exams,subjectEngine.getFilterOptions().exams,'자격증 선택지는 전체 유지');
+
+
+// 실제 필터 함수를 최소 DOM 대역에서 실행하며 브라우저 화면 검증과 구분한다.
+const { runInNewContext } = await import('node:vm');
+function selectFixture() {
+  return { value:'ALL', options:[], listeners:{},
+    set innerHTML(html) { this.options=[...html.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]);this.value=this.options[0]??''; },
+    addEventListener(type,fn) { this.listeners[type]=fn; }
+  };
+}
+const filterSource=fs.readFileSync(path.join(__dirname,'../js/app.js'),'utf8');
+const populateSource=filterSource.match(/  function populateFilters\(\) \{[\s\S]*?\n  \}/)[0];
+const listenerSource=filterSource.slice(filterSource.indexOf('  const filterElements ='),filterSource.indexOf("  filterKeyword.addEventListener('input'"));
+const resetSource=filterSource.match(/  btnResetFilters\.addEventListener\('click',[\s\S]*?\n  \}\);/)[0];
+const filterContext={engine:subjectEngine,filterExam:selectFixture(),filterSubject:selectFixture(),filterArea:selectFixture(),filterYear:selectFixture(),filterType:selectFixture(),filterDifficulty:selectFixture(),filterKeyword:{value:''},btnResetFilters:selectFixture(),escapeHtml:x=>String(x),showToast:()=>{},updates:[],histories:[]};
+filterContext.updateMatchedCount=()=>filterContext.updates.push({exam:filterContext.filterExam.value,subject:filterContext.filterSubject.value});
+filterContext.switchHistoryContext=()=>filterContext.histories.push({exam:filterContext.filterExam.value,subject:filterContext.filterSubject.value});
+runInNewContext(populateSource+'\n'+listenerSource+'\n'+resetSource,filterContext);
+filterContext.populateFilters();assert.strictEqual(filterContext.filterSubject.options.length,4);
+filterContext.filterSubject.value='데이터베이스';filterContext.filterExam.value='공공조달관리사';filterContext.filterExam.listeners.change();
+assert.strictEqual(filterContext.filterSubject.value,'ALL');assert.strictEqual(filterContext.filterSubject.options.length,3);
+assert.deepStrictEqual(filterContext.histories.at(-1),{exam:'공공조달관리사',subject:'ALL'},'무효 과목 초기화 후 이력 전환');
+filterContext.filterSubject.value=sourceArea;filterContext.filterExam.value='정보처리기사';filterContext.filterExam.listeners.change();
+assert.strictEqual(filterContext.filterSubject.value,'ALL');assert.deepStrictEqual(filterContext.filterSubject.options,['ALL','데이터베이스']);
+filterContext.btnResetFilters.listeners.click();assert.strictEqual(filterContext.filterExam.value,'ALL');assert.strictEqual(filterContext.filterSubject.options.length,4);
+filterContext.filterExam.value='존재하지 않는 이전 자격증';filterContext.populateFilters();assert.strictEqual(filterContext.filterExam.value,'ALL');assert.strictEqual(filterContext.filterSubject.options.length,4);
+console.log('✓ 자격증 변경·무효 과목 초기화·전체 필터 복원 동작 통과');
+
 console.log('--- 1. CSV 파서 RFC 4180 단위 테스트 ---');
 const testCSV = `id,자격증,과목,유형,난이도,제목,문제,보기,정답,해설
 1,테스트자격,과목A,단답형,기초,"따옴표 ""포함"" 제목","문제 내에 쉼표, 그리고 줄바꿈\n줄바꿈이 있는 문제",보기1|보기2|보기3,정답1,"해설입니다, 쉼표 포함"
@@ -208,11 +260,72 @@ assert.strictEqual(readHistory(testKey1).exists, false);
 
 console.log('✓ 조건별 history 파일명 생성, 저장, 조회, 삭제 검증 통과');
 
+
+console.log('--- 과목·영역·연도 및 연도별 이력 회귀 검증 ---');
+const yearQuestions = parseRowsToQuestions([
+  ['id','exam','year','subject','area_label','question','model_answer'],
+  ['q1','공공조달관리사',2026,'실기',sourceArea,'문제26','답26'],
+  ['q1','공공조달관리사',2025,'실기',sourceArea,'문제25','답25'],
+  ['q1','공공조달관리사',2026,'필기','영역B','필기문제','답'],
+  ['q2','정보처리기사','','필기','영역C','연도미지정','답']
+]);
+assert.strictEqual(yearQuestions[0].year,'2026');
+assert.strictEqual(yearQuestions[0].subject,'실기');
+assert.strictEqual(yearQuestions[0].area_label,sourceArea);
+assert.strictEqual(yearQuestions[0].id,'q1','원본 문항 번호 유지');
+assert.throws(()=>parseRowsToQuestions([['question','year'],['문제','2026-01-01']]),/year/);
+assert.strictEqual(parseJSONQuestions([{question:'문제',년도:2024}])[0].year,'2024');
+assert.strictEqual(parseRowsToQuestions([['subject','area_label','question'],['',sourceArea,'문제']])[0].subject,'','명시적 빈 과목 보존');
+const yearEngine=new QuizEngine(yearQuestions);
+assert.deepStrictEqual(yearEngine.getFilterOptions('공공조달관리사','실기').years,['2026','2025']);
+assert.deepStrictEqual(yearEngine.getFilterOptions('공공조달관리사','실기').areas,[sourceArea]);
+assert.strictEqual(yearEngine.filterQuestions({exam:'공공조달관리사',subject:'실기',year:'2026',area_label:sourceArea}).length,1);
+assert.strictEqual(yearEngine.filterQuestions({year:'UNSPECIFIED'}).length,1);
+assert.strictEqual(yearEngine.filterQuestions({keyword:sourceArea}).length,2);
+assert.strictEqual(new Set(yearQuestions.map(q=>QuizEngine.questionKey(q))).size,4,'연도와 과목이 다른 같은 번호의 문제 구분');
+assert.strictEqual(yearEngine.pickRandom({},10,{excludeSeen:true}).items.length,4);
+assert.strictEqual(yearEngine.seenCount,4);
+assert.strictEqual(QuizEngine.questionKey({id:'legacy'}),'legacy');
+const yearKey={...testKey1,year:'2026'};
+const previousYearKey={...testKey1,year:'2025'};
+assert.notStrictEqual(buildHistoryFileName(yearKey),buildHistoryFileName(previousYearKey));
+assert.notStrictEqual(buildHistoryFileName({...testKey1,area_label:'2026'}),buildHistoryFileName(yearKey),'영역과 연도 키 충돌 방지');
+assert.strictEqual(buildHistoryFileName({...testKey1,year:'ALL',area_label:'ALL'}),fileName1,'전체 필터는 이전 파일명 유지');
+try {
+  appendHistory(yearKey,[yearQuestions[0]]);
+  appendHistory(previousYearKey,[yearQuestions[1]]);
+  assert.deepStrictEqual(readHistory(yearKey).seenIds,[QuizEngine.questionKey(yearQuestions[0])]);
+  assert.deepStrictEqual(readHistory(previousYearKey).seenIds,[QuizEngine.questionKey(yearQuestions[1])]);
+  assert.ok(readHistory(yearKey).content.includes('- 연도: 2026'));
+} finally { deleteHistory(yearKey);deleteHistory(previousYearKey); }
+const yearText=formatQuestionsAsText([yearQuestions[0]]);
+assert.ok(yearText.includes('과목: 실기') && yearText.includes('연도: 2026') && yearText.includes(sourceArea));
+filterContext.engine=yearEngine;
+filterContext.populateFilters();
+filterContext.filterExam.value='공공조달관리사';filterContext.filterExam.listeners.change();
+filterContext.filterSubject.value='실기';filterContext.filterSubject.listeners.change();
+assert.deepStrictEqual(filterContext.filterYear.options,['ALL','2026','2025']);
+filterContext.filterYear.value='2026';filterContext.filterArea.value=sourceArea;
+filterContext.filterExam.value='정보처리기사';filterContext.filterExam.listeners.change();
+assert.strictEqual(filterContext.filterYear.value,'ALL');
+assert.strictEqual(filterContext.filterArea.value,'ALL');
+assert.deepStrictEqual(filterContext.filterYear.options,['ALL','UNSPECIFIED']);
+filterContext.btnResetFilters.listeners.click();
+assert.strictEqual(filterContext.filterYear.value,'ALL');
+assert.strictEqual(filterContext.filterArea.value,'ALL');
+const historyKeySource=filterSource.match(/  function getHistoryKey\(\) \{[\s\S]*?\n  \}/)[0];
+const localKeySource=filterSource.match(/  function localStorageKeyFor\(key\) \{[\s\S]*?\n  \}/)[0];
+const historyContext={currentSourceId:'old.csv',HISTORY_KEY_FIELDS:['exam','subject','type','difficulty','area_label','year'],LOCAL_STORAGE_HISTORY_PREFIX:'quiz_picker_seen::',getActiveFilters:()=>({exam:'ALL',subject:'ALL',type:'ALL',difficulty:'ALL',area_label:'ALL',year:'ALL'})};
+runInNewContext(historyKeySource+'\n'+localKeySource,historyContext);
+assert.strictEqual(historyContext.localStorageKeyFor(historyContext.getHistoryKey()),'quiz_picker_seen::'+JSON.stringify({source:'old.csv',exam:'ALL',subject:'ALL',type:'ALL',difficulty:'ALL'}),'브라우저 기존 전체 조건 저장 키 유지');
+console.log('✓ 연도별 필터·저장·중복 방지·기존 키 호환 통과');
+
 console.log('--- 7. Google Drive 설정 엔드포인트 (/api/google-config) 단위 테스트 ---');
 const { server, loadGoogleConfigFile } = require('../server.js');
 
 // 파일 기반 로드 테스트: 임시 google-config.json 생성 후 확인
 const tempConfigPath = path.join(__dirname, '../google-config.json');
+const originalConfig = fs.existsSync(tempConfigPath) ? fs.readFileSync(tempConfigPath) : null;
 fs.writeFileSync(tempConfigPath, JSON.stringify({
   clientId: 'mock-test-client-id.apps.googleusercontent.com',
   apiKey: 'mock-test-api-key'
@@ -224,9 +337,8 @@ try {
   assert.strictEqual(loaded.apiKey, 'mock-test-api-key', 'google-config.json에서 apiKey 정상 로드');
   console.log('✓ google-config.json 파일 로더 테스트 통과');
 } finally {
-  if (fs.existsSync(tempConfigPath)) {
-    fs.unlinkSync(tempConfigPath);
-  }
+  if (originalConfig !== null) fs.writeFileSync(tempConfigPath, originalConfig);
+  else if (fs.existsSync(tempConfigPath)) fs.unlinkSync(tempConfigPath);
 }
 
 const testServer = server.listen(0, async () => {
@@ -238,6 +350,27 @@ const testServer = server.listen(0, async () => {
     assert.ok(typeof data.clientId === 'string', 'clientId 문자열 필드 존재');
     assert.ok(typeof data.apiKey === 'string', 'apiKey 문자열 필드 존재');
     console.log('✓ /api/google-config 엔드포인트 테스트 통과');
+
+    const apiKey = {...testKey1,source:`year-api-unit-${Date.now()}.json`,year:'2026',area_label:sourceArea};
+    const apiOtherYear = {...apiKey,year:'2025'};
+    try {
+      for (const [key,q] of [[apiKey,yearQuestions[0]],[apiOtherYear,yearQuestions[1]]]) {
+        const saved = await fetch(`http://localhost:${port}/api/history`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,questions:[q]})});
+        assert.strictEqual(saved.status,200);
+        assert.deepStrictEqual((await saved.json()).seenIds,[QuizEngine.questionKey(q)]);
+      }
+      const saved = await fetch(`http://localhost:${port}/api/history?${new URLSearchParams(apiKey)}`);
+      const result = await saved.json();
+      assert.strictEqual(result.key.year,'2026');
+      assert.strictEqual(result.key.area_label,sourceArea);
+      assert.deepStrictEqual(result.seenIds,[QuizEngine.questionKey(yearQuestions[0])]);
+      const removed = await fetch(`http://localhost:${port}/api/history?${new URLSearchParams(apiKey)}`,{method:'DELETE'});
+      assert.strictEqual(removed.status,200);
+      assert.strictEqual(readHistory(apiKey).exists,false);
+      assert.strictEqual(readHistory(apiOtherYear).exists,true,'다른 연도 이력 보존');
+    } finally {deleteHistory(apiKey);deleteHistory(apiOtherYear);}
+    console.log('✓ 연도별 이력 HTTP 저장·조회·삭제 검증 통과');
+
   } finally {
     testServer.close();
 
@@ -293,6 +426,15 @@ q2,1,영역 1. 실무 기본 절차,절차·판단형,Q2.,"[절차·판단형]
 
     const autoParsedExcel = parseAuto(multiSheetBuffer, 'test.xlsx');
     assert.strictEqual(autoParsedExcel.length, 3, 'parseAuto로 다중 시트 엑셀 자동 파싱 성공');
+
+    const yearWb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(yearWb,XLSX.utils.aoa_to_sheet([['id','year','subject','area_label','question'],['q1',2026,'실기',sourceArea,'문제']]),'연도문제');
+    const yearXlsx = parseExcelQuestions(XLSX.write(yearWb,{type:'buffer',bookType:'xlsx'}));
+    assert.strictEqual(yearXlsx[0].year,'2026');
+    assert.strictEqual(yearXlsx[0].area_label,sourceArea);
+    yearWb.Sheets['연도문제'].B2={t:'s',v:'잘못된연도'};
+    assert.throws(()=>parseExcelQuestions(XLSX.write(yearWb,{type:'buffer',bookType:'xlsx'})),/year/,'잘못된 연도를 가진 시트를 조용히 제외하지 않음');
+
     console.log('✓ 엑셀(.xlsx) 다중 시트 파서 단위 테스트 통과');
 
     console.log('--- 10. 다중 파일(개수 무관) 병합 및 ID 고유화 시뮬레이션 단위 테스트 ---');

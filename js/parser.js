@@ -10,6 +10,7 @@ const KEY_ALIASES = {
     'subject', '과목', '영역', '관련영역', '관련 영역', '분야', '대영역', '중영역', '소영역', '단원',
     'category', 'domain', 'area', 'area_label', 'arealabel', 'area_name', 'areaname', 'area_desc'
   ],
+  year: ['year', '연도', '년도', '출제연도'],
   type: ['type', '유형', '문제유형', '문제 유형', '문항유형', '문항 유형', '질문유형', '질문 유형', '포맷', 'format', 'questionType', 'itemType'],
   difficulty: ['difficulty', '난이도', '수준', '등급', 'level'],
   title: ['title', '제목', '소제목', '주제', '문제제목', 'number_label', 'numberlabel', 'q_label', 'label'],
@@ -160,10 +161,23 @@ function normalizeQuestion(rawObj, fallbackIndex = 1) {
     }
   }
 
+  // 명시적 과목을 영역 별칭보다 우선해 열 순서에 따른 덮어쓰기를 막는다.
+  for (const header of ['subject', '과목']) {
+    const entry = Object.entries(rawObj).find(([key]) => normalizeKeyName(key) === header);
+    if (entry) { normalized.subject = entry[1]; break; }
+  }
+
+  const areaEntry = Object.entries(rawObj).find(([key]) => ['arealabel', '관련영역', '영역'].includes(normalizeKeyName(key)));
+  normalized.area_label = String(areaEntry?.[1] ?? '').trim();
+
   // 기본값 및 타입 정규화
   normalized.id = String(normalized.id || `q-${fallbackIndex}`).trim();
   normalized.exam = String(normalized.exam || '').trim();
   normalized.subject = String(normalized.subject || '').trim();
+  normalized.year = String(normalized.year ?? '').trim();
+  if (normalized.year && !/^[1-9]\d{3}$/.test(normalized.year)) {
+    throw Object.assign(new Error(`문항 ${normalized.id}: year는 네 자리 연도로 입력하세요.`), { code: 'INVALID_YEAR' });
+  }
   normalized.type = String(normalized.type || '').trim();
   normalized.difficulty = String(normalized.difficulty || '').trim();
 
@@ -301,7 +315,7 @@ function parseExcelQuestions(data, filename = '') {
         if (sheetQuestions.length > 0) {
           sheetQuestions.forEach((q) => {
             // 시트별 분리를 위해 과목/영역이 비어있으면 시트명을 과목으로 지정
-            if (!q.subject) {
+            if (!q.subject && !rows[0].some(h => ['subject', '과목'].includes(normalizeKeyName(h)))) {
               q.subject = sName;
             }
             if (sheetNames.length > 1) {
@@ -312,6 +326,7 @@ function parseExcelQuestions(data, filename = '') {
           allQuestions.push(...sheetQuestions);
         }
       } catch (err) {
+        if (err.code === 'INVALID_YEAR') throw err;
         // 유효한 문제 행이 없는 부가 시트는 통과
       }
     }
@@ -422,7 +437,9 @@ function formatQuestionsAsText(questions, title = '출제 문제 기록', option
   questions.forEach((q, idx) => {
     const tags = [
       q.exam ? `자격증/시험: ${q.exam}` : '',
-      q.subject ? `관련 영역: ${q.subject}` : '',
+      q.subject ? `과목: ${q.subject}` : '',
+      q.area_label ? `관련 영역: ${q.area_label}` : '',
+      q.year ? `연도: ${q.year}` : '',
       q.type ? `유형: ${q.type}` : '',
       q.difficulty ? `난이도: ${q.difficulty}` : ''
     ].filter(Boolean).join(' | ');

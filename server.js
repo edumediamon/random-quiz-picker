@@ -8,6 +8,7 @@
  */
 
 const http = require('node:http');
+const { QuizEngine } = require('./js/quiz-engine.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -17,18 +18,22 @@ const ROOT_DIR = __dirname;
 const HISTORY_DIR = path.resolve(process.env.QUIZ_HISTORY_DIR || path.join(ROOT_DIR, 'history'));
 
 // 조건 키 구성 필드와 '전체' 선택 시 파일명에 쓰는 라벨
-const HISTORY_KEY_FIELDS = ['exam', 'subject', 'type', 'difficulty'];
+const HISTORY_KEY_FIELDS = ['exam', 'subject', 'type', 'difficulty', 'area_label', 'year'];
 const ALL_LABELS = {
   exam: '전체자격증',
   subject: '전체영역',
   type: '전체유형',
-  difficulty: '전체난이도'
+  difficulty: '전체난이도',
+  area_label: '전체관련영역',
+  year: '전체연도'
 };
 const FIELD_LABELS = {
   exam: '자격증/시험',
-  subject: '관련 영역',
+  subject: '과목',
   type: '문제 유형',
-  difficulty: '난이도'
+  difficulty: '난이도',
+  area_label: '관련 영역',
+  year: '연도'
 };
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
@@ -99,7 +104,7 @@ function loadGoogleConfigFile() {
 // ==========================================================================
 
 /**
- * 입력값을 { source, exam, subject, type, difficulty } 형태로 정규화
+ * 입력값을 { source, exam, subject, type, difficulty, area_label?, year? } 형태로 정규화
  * 비어 있거나 'ALL'인 조건은 'ALL'로 통일한다.
  */
 function normalizeHistoryKey(input = {}) {
@@ -107,6 +112,7 @@ function normalizeHistoryKey(input = {}) {
   const key = { source };
   HISTORY_KEY_FIELDS.forEach(field => {
     const value = String(input[field] ?? '').trim();
+    if (['area_label', 'year'].includes(field) && (!value || value === 'ALL')) return;
     key[field] = value && value !== 'ALL' ? value : 'ALL';
   });
   return key;
@@ -133,16 +139,18 @@ function buildHistoryFileName(input = {}) {
   const key = normalizeHistoryKey(input);
   let altered = false;
 
-  const segments = [key.source, ...HISTORY_KEY_FIELDS.map(f => key[f])].map((raw, idx) => {
-    const field = idx === 0 ? null : HISTORY_KEY_FIELDS[idx - 1];
+  const fields = HISTORY_KEY_FIELDS.filter(f => key[f] !== undefined);
+  const segments = [key.source, ...fields.map(f => key[f])].map((raw, idx) => {
+    const field = idx === 0 ? null : fields[idx - 1];
     if (field && raw === 'ALL') return ALL_LABELS[field];
+    if (['area_label', 'year'].includes(field)) raw = field + '=' + raw;
     const safe = sanitizeSegment(raw);
     if (safe !== raw || !safe) altered = true;
     return safe || '_';
   });
 
   let base = segments.join('__');
-  if (altered) {
+  if (altered || key.area_label !== undefined || key.year !== undefined) {
     const hash = crypto.createHash('sha1').update(JSON.stringify(key)).digest('hex').slice(0, 8);
     base += `__${hash}`;
   }
@@ -203,6 +211,7 @@ function buildHistoryHeader(key, fileName) {
   header += `생성 일시: ${formatTimestamp()}\n`;
   header += `문제 파일: ${normalized.source}\n`;
   HISTORY_KEY_FIELDS.forEach(field => {
+    if (normalized[field] === undefined) return;
     const value = normalized[field] === 'ALL' ? `전체 (${ALL_LABELS[field]})` : normalized[field];
     header += `${FIELD_LABELS[field]}: ${value}\n`;
   });
@@ -220,9 +229,11 @@ function formatQuestionsForHistoryFile(questions, existingCount = 0) {
 
   questions.forEach((q, idx) => {
     const recordNum = existingCount + idx + 1;
-    chunk += `[기록 ${recordNum}] ID: ${normalizeId(q.id, `unknown-${recordNum}`)} | 일시: ${timestampStr}\n`;
+    chunk += `[기록 ${recordNum}] ID: ${normalizeId(QuizEngine.questionKey(q), `unknown-${recordNum}`)} | 일시: ${timestampStr}\n`;
     if (q.exam) chunk += `- 시험/자격증: ${q.exam}\n`;
-    if (q.subject) chunk += `- 관련 영역: ${q.subject}\n`;
+    if (q.subject) chunk += `- 과목: ${q.subject}\n`;
+    if (q.area_label) chunk += `- 관련 영역: ${q.area_label}\n`;
+    if (q.year) chunk += `- 연도: ${q.year}\n`;
     if (q.type) chunk += `- 문제 유형: ${q.type}\n`;
     if (q.difficulty) chunk += `- 난이도: ${q.difficulty}\n`;
     if (q.title) chunk += `- 제목: ${q.title}\n`;
